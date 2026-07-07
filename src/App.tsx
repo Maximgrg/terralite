@@ -1,0 +1,755 @@
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { Engine, type EngineState } from "./engine";
+import { ITEMS, RECIPES, type Station } from "./world";
+import { audio } from "./audio";
+import bg from "./assets/sandbox-bg.jpg";
+import Landing from "./Landing";
+
+type Screen = "landing" | "title" | "story" | "howto" | "playing";
+
+const ls = {
+  get: (k: string, d: string) => {
+    try {
+      return localStorage.getItem(k) ?? d;
+    } catch {
+      return d;
+    }
+  },
+  set: (k: string, v: string) => {
+    try {
+      localStorage.setItem(k, v);
+    } catch {
+      /* ignore */
+    }
+  },
+};
+
+const STORY = [
+  "The world of Terralite was once whole — earth, ore and sky in perfect balance. Then the Slime King rose from the deep, swallowing the light and shattering the land into endless caves.",
+  "You wake alone on the surface with nothing but your bare hands. To survive you must chop wood, dig into the earth, and forge tools from the ores you uncover.",
+  "Build a shelter before nightfall, for when the sun sets, zombies and bats crawl from the dark. Light torches. Smelt metals. Grow stronger.",
+  "Craft the Slime Crown, summon the King, and reclaim the world. This is your saga — block by block, blade by blade.",
+];
+
+const HOWTO = [
+  { h: "Move & Survive", t: "A / D or ← → to walk. Space / W to jump. You regenerate health when safe." },
+  { h: "Mine", t: "Hold LEFT-CLICK on a block within reach. Bare hands mine wood & dirt; craft pickaxes to dig stone, ores and diamond." },
+  { h: "Build", t: "RIGHT-CLICK places the selected block. Build walls, towers and a home lit by torches." },
+  { h: "Craft", t: "Press E to open the crafting menu. A Workbench unlocks tools; a Furnace smelts ore into bars." },
+  { h: "Fight", t: "Craft a sword and LEFT-CLICK enemies. Slimes drop gel, zombies lurk at night, bats haunt the caves." },
+  { h: "Progress", t: "Follow the Quest log (top-right). Mine deeper for better ore, craft the Crown, and slay the Slime King to win!" },
+];
+
+const STATION_LABEL: Record<Station, string> = { none: "Hands", workbench: "Workbench", furnace: "Furnace" };
+
+function itemIcon(id: string) {
+  return ITEMS[id]?.icon ?? "❓";
+}
+function itemName(id: string) {
+  return ITEMS[id]?.name ?? id;
+}
+
+function Btn({
+  children,
+  onClick,
+  variant = "ghost",
+  className = "",
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  variant?: "primary" | "ghost" | "danger" | "gold";
+  className?: string;
+}) {
+  const base = "font-semibold tracking-wide uppercase rounded-xl px-6 py-3 text-sm transition-all duration-150 active:scale-95 select-none";
+  const styles: Record<string, string> = {
+    primary: "text-[#1a1205] bg-gradient-to-r from-[#ffe08a] via-[#ffcf6b] to-[#ffb24d] shadow-[0_0_24px_rgba(255,190,90,0.45)] hover:-translate-y-0.5",
+    gold: "text-[#1a1205] bg-gradient-to-r from-[#fff2c4] to-[#ffcf66] shadow-[0_0_20px_rgba(255,200,100,0.4)] hover:-translate-y-0.5",
+    ghost: "text-emerald-50 border border-emerald-200/30 bg-black/40 hover:bg-emerald-300/10 hover:border-emerald-200/60",
+    danger: "text-rose-100 border border-rose-300/30 bg-rose-500/10 hover:bg-rose-500/20",
+  };
+  return (
+    <button onClick={onClick} className={`${base} ${styles[variant]} ${className}`}>
+      {children}
+    </button>
+  );
+}
+
+// ---------------- Stage ----------------
+const Stage = memo(function Stage({
+  runId,
+  mode,
+  engineRef,
+  onState,
+  onGameOver,
+  onVictory,
+}: {
+  runId: number;
+  mode: "new" | "auto";
+  engineRef: React.MutableRefObject<Engine | null>;
+  onState: (s: EngineState) => void;
+  onGameOver: () => void;
+  onVictory: () => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cb = useRef({ onState, onGameOver, onVictory });
+  cb.current = { onState, onGameOver, onVictory };
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const eng = new Engine(canvas, {
+      onState: (s) => cb.current.onState(s),
+      onGameOver: () => cb.current.onGameOver(),
+      onVictory: () => cb.current.onVictory(),
+    });
+    engineRef.current = eng;
+    eng.start(modeRef.current);
+    return () => {
+      eng.destroy();
+      engineRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId]);
+
+  return <canvas ref={canvasRef} className="block h-full w-full touch-none" />;
+});
+
+// ---------------- HUD ----------------
+function Hearts({ hp, maxHp }: { hp: number; maxHp: number }) {
+  const hearts = Math.ceil(maxHp / 20);
+  return (
+    <div className="flex flex-wrap gap-0.5">
+      {Array.from({ length: hearts }).map((_, i) => {
+        const full = hp >= (i + 1) * 20;
+        const half = !full && hp > i * 20;
+        return (
+          <span key={i} className="text-base leading-none drop-shadow" style={{ filter: full || half ? "drop-shadow(0 0 4px rgba(255,80,110,0.6))" : "none" }}>
+            {full ? "❤️" : half ? "❤" : "🤍"}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function Clock({ dayFrac, isNight, dayCount }: { dayFrac: number; isNight: boolean; dayCount: number }) {
+  const total = dayFrac * 24;
+  const h = Math.floor(total);
+  const m = Math.floor((total - h) * 60);
+  const t = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+  return (
+    <div className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-black/50 px-3 py-1 text-sm">
+      <span>{isNight ? "🌙" : "☀️"}</span>
+      <span className="tabular-nums text-white/90">{t}</span>
+      <span className="text-white/40">·</span>
+      <span className="text-white/60">Day {dayCount}</span>
+    </div>
+  );
+}
+
+function Hud({
+  s,
+  onSelectSlot,
+  onToggleInv,
+  onPause,
+}: {
+  s: EngineState;
+  onSelectSlot: (i: number) => void;
+  onToggleInv: () => void;
+  onPause: () => void;
+}) {
+  return (
+    <div className="pointer-events-none absolute inset-0 select-none">
+      {/* top-left vitals */}
+      <div className="absolute left-3 top-3 space-y-1">
+        <Hearts hp={s.hp} maxHp={s.maxHp} />
+        <div className="text-xs text-rose-100/80">
+          {s.hp} / {s.maxHp} HP{s.defense > 0 ? `  ·  🛡 ${s.defense} def` : ""}
+        </div>
+      </div>
+
+      {/* top-center clock */}
+      <div className="absolute left-1/2 top-3 -translate-x-1/2">
+        <Clock dayFrac={s.dayFrac} isNight={s.isNight} dayCount={s.dayCount} />
+        <div className="mt-1 text-center text-[11px] uppercase tracking-widest text-white/50">{s.depth > 0 ? `Underground · ${s.depth}m` : "Surface"}</div>
+      </div>
+
+      {/* top-right quest + buttons */}
+      <div className="absolute right-3 top-3 flex flex-col items-end gap-2">
+        <div className="flex gap-2">
+          <button onClick={onToggleInv} className="pointer-events-auto rounded-lg border border-white/15 bg-black/50 px-3 py-1.5 text-sm text-white/85 hover:bg-white/10">
+            🎒 <span className="hidden sm:inline">Inventory</span> <span className="text-white/40">(E)</span>
+          </button>
+          <button onClick={onPause} className="pointer-events-auto rounded-lg border border-white/15 bg-black/50 px-3 py-1.5 text-sm text-white/85 hover:bg-white/10">
+            ❚❚
+          </button>
+        </div>
+        <div className="pointer-events-none w-56 rounded-xl border border-emerald-300/20 bg-black/55 p-2.5 backdrop-blur-sm">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-300/80">{s.questDone ? "All Complete" : "Quest"}</div>
+          <div className="text-sm font-semibold text-white/90">{s.questTitle}</div>
+          <div className="text-xs text-white/60">{s.questText}</div>
+        </div>
+      </div>
+
+      {/* boss bar */}
+      {s.boss && (
+        <div className="absolute bottom-24 left-1/2 w-[80%] max-w-xl -translate-x-1/2">
+          <div className="mb-1 text-center text-sm font-semibold text-emerald-200">{s.boss.name}</div>
+          <div className="h-3 w-full overflow-hidden rounded-full bg-black/70 ring-1 ring-emerald-400/30">
+            <div className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-lime-400 transition-[width] duration-150" style={{ width: `${(s.boss.hp / s.boss.maxHp) * 100}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* banner */}
+      {s.banner && (
+        <div key={s.banner.key} className="anim-banner absolute inset-x-0 top-[30%] flex flex-col items-center text-center">
+          <div className="text-2xl font-black text-amber-200 drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] sm:text-3xl">{s.banner.title}</div>
+          <div className="mt-1 text-sm uppercase tracking-[0.3em] text-white/80 sm:text-base">{s.banner.sub}</div>
+        </div>
+      )}
+
+      {/* hotbar */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2">
+        <div className="flex gap-1 rounded-2xl border border-white/10 bg-black/50 p-1.5 backdrop-blur-sm">
+          {s.inventory.slice(0, 10).map((slot, i) => (
+            <button
+              key={i}
+              onClick={() => onSelectSlot(i)}
+              className={`pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-lg border text-2xl transition-all sm:h-14 sm:w-14 ${
+                s.selected === i ? "border-amber-300 bg-amber-300/20 ring-2 ring-amber-300/50" : "border-white/10 bg-white/5 hover:bg-white/10"
+              }`}
+            >
+              <span className="absolute left-1 top-0.5 text-[9px] text-white/40">{(i + 1) % 10}</span>
+              {slot && <span>{itemIcon(slot.id)}</span>}
+              {slot && slot.count > 1 && <span className="absolute bottom-0.5 right-1 text-[10px] font-bold text-white">{slot.count}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- Inventory + Crafting ----------------
+function InventoryPanel({
+  s,
+  onClose,
+  onCraft,
+  onConsume,
+  onSummon,
+  onSwap,
+  onSelectSlot,
+}: {
+  s: EngineState;
+  onClose: () => void;
+  onCraft: (id: string) => void;
+  onConsume: (id: string) => void;
+  onSummon: () => void;
+  onSwap: (a: number, b: number) => void;
+  onSelectSlot: (i: number) => void;
+}) {
+  const sel = s.inventory[s.selected];
+  const dragIndex = useRef<number | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  return (
+    <div className="anim-fade absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
+      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0c0f1a]/95 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
+          <h2 className="text-lg font-bold text-amber-100">Inventory & Crafting</h2>
+          <div className="flex items-center gap-3 text-xs text-white/60">
+            <span className={s.stations.workbench ? "text-emerald-300" : "text-white/30"}>🛠️ Workbench {s.stations.workbench ? "✓" : "✗"}</span>
+            <span className={s.stations.furnace ? "text-emerald-300" : "text-white/30"}>🏭 Furnace {s.stations.furnace ? "✓" : "✗"}</span>
+            <button onClick={onClose} className="rounded-md bg-white/10 px-3 py-1 text-white hover:bg-white/20">
+              Close ✕
+            </button>
+          </div>
+        </div>
+
+        <div className="grid gap-4 overflow-y-auto p-5 md:grid-cols-2">
+          {/* inventory grid */}
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-white/40">
+              <span>Items</span>
+              <span className="normal-case tracking-normal text-white/25">· перетаскивай предметы между ячейками</span>
+            </div>
+            <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8">
+              {s.inventory.map((slot, i) => {
+                const dragging = dragIndex.current === i;
+                const hovered = hoverIndex === i && dragIndex.current !== null && dragIndex.current !== i;
+                return (
+                  <div
+                    key={i}
+                    draggable={!!slot}
+                    onDragStart={(e) => {
+                      dragIndex.current = i;
+                      e.dataTransfer.effectAllowed = "move";
+                      try {
+                        e.dataTransfer.setData("text/plain", String(i));
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    onDragEnd={() => {
+                      dragIndex.current = null;
+                      setHoverIndex(null);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      if (hoverIndex !== i) setHoverIndex(i);
+                    }}
+                    onDragLeave={() => {
+                      if (hoverIndex === i) setHoverIndex(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const from = dragIndex.current;
+                      dragIndex.current = null;
+                      setHoverIndex(null);
+                      if (from !== null && from !== i) onSwap(from, i);
+                    }}
+                    onClick={() => {
+                      // single click on a hotbar slot selects it
+                      if (i < 10) onSelectSlot(i);
+                    }}
+                    title={slot ? `${itemName(slot.id)} ×${slot.count}` : ""}
+                    className={`relative flex aspect-square cursor-grab items-center justify-center rounded-lg border text-xl transition-colors active:cursor-grabbing ${
+                      i === s.selected
+                        ? "border-amber-300 bg-amber-300/20"
+                        : hovered
+                        ? "border-emerald-300 bg-emerald-300/20"
+                        : i < 10
+                        ? "border-white/15 bg-white/5"
+                        : "border-white/5 bg-black/30"
+                    } ${dragging ? "opacity-30" : ""}`}
+                  >
+                    {slot && <span className="pointer-events-none select-none">{itemIcon(slot.id)}</span>}
+                    {slot && slot.count > 1 && (
+                      <span className="pointer-events-none absolute bottom-0 right-0.5 text-[10px] font-bold text-white">{slot.count}</span>
+                    )}
+                    {i < 10 && <span className="pointer-events-none absolute left-0.5 top-0 text-[8px] text-white/30">{(i + 1) % 10}</span>}
+                    {hovered && <span className="pointer-events-none absolute inset-0 rounded-lg ring-2 ring-emerald-300/70" />}
+                  </div>
+                );
+              })}
+            </div>
+            {/* selected item actions */}
+            <div className="mt-3 rounded-lg border border-white/10 bg-black/30 p-3">
+              {sel ? (
+                <div>
+                  <div className="text-sm font-semibold text-white">
+                    {itemIcon(sel.id)} {itemName(sel.id)} <span className="text-white/40">×{sel.count}</span>
+                  </div>
+                  {ITEMS[sel.id]?.desc && <div className="text-xs text-white/50">{ITEMS[sel.id].desc}</div>}
+                  <div className="mt-2 flex gap-2">
+                    {sel.id === "apple" && (
+                      <Btn variant="gold" className="px-4 py-1.5 text-xs" onClick={() => onConsume("apple")}>
+                        🍎 Eat (+25 HP)
+                      </Btn>
+                    )}
+                    {sel.id === "crown" && (
+                      <Btn variant="primary" className="px-4 py-1.5 text-xs" onClick={onSummon}>
+                        👑 Summon King {s.isNight ? "(night ✓)" : "(needs night)"}
+                      </Btn>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-white/40">Hotbar slot {s.selected + 1} is empty.</div>
+              )}
+            </div>
+          </div>
+
+          {/* crafting */}
+          <div>
+            <div className="mb-2 text-xs uppercase tracking-widest text-white/40">Crafting</div>
+            <div className="space-y-1.5">
+              {RECIPES.map((r) => {
+                const can = s.craftable.includes(r.id);
+                const out = ITEMS[r.out];
+                return (
+                  <div key={r.id} className={`flex items-center gap-2 rounded-lg border p-2 ${can ? "border-emerald-400/30 bg-emerald-400/5" : "border-white/5 bg-black/20 opacity-60"}`}>
+                    <span className="text-xl">{out.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-semibold text-white/90">
+                        {out.name} <span className="text-white/40">×{r.outCount}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-x-2 text-[10px] text-white/50">
+                        <span className={s.stations[r.station as "workbench" | "furnace"] || r.station === "none" ? "text-emerald-300/70" : "text-rose-300/60"}>{STATION_LABEL[r.station]}</span>
+                        {r.ing.map((ing) => (
+                          <span key={ing.id}>
+                            {itemIcon(ing.id)} {ing.n}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      disabled={!can}
+                      onClick={() => onCraft(r.id)}
+                      className={`rounded-md px-3 py-1 text-xs font-semibold ${can ? "bg-emerald-400 text-emerald-950 hover:bg-emerald-300" : "bg-white/5 text-white/30"}`}
+                    >
+                      Craft
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- Title / Story / HowTo ----------------
+const motes = Array.from({ length: 22 }, () => ({ left: Math.random() * 100, top: Math.random() * 100, size: 2 + Math.random() * 4, delay: Math.random() * 6, dur: 4 + Math.random() * 6, op: 0.2 + Math.random() * 0.4 }));
+
+function TitleScreen({
+  onPlay,
+  onHowTo,
+  bestDay,
+  musicOn,
+  sfxOn,
+  toggleMusic,
+  toggleSfx,
+}: {
+  onPlay: () => void;
+  onHowTo: () => void;
+  bestDay: number;
+  musicOn: boolean;
+  sfxOn: boolean;
+  toggleMusic: () => void;
+  toggleSfx: () => void;
+}) {
+  return (
+    <div className="anim-fade relative h-full w-full overflow-hidden">
+      <img src={bg} alt="" className="absolute inset-0 h-full w-full object-cover opacity-80" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/50 to-[#070a12]" />
+      {motes.map((m, i) => (
+        <span key={i} className="anim-float absolute rounded-full bg-amber-200" style={{ left: `${m.left}%`, top: `${m.top}%`, width: m.size, height: m.size, opacity: m.op, animationDelay: `${m.delay}s`, animationDuration: `${m.dur}s`, boxShadow: "0 0 8px #ffd277" }} />
+      ))}
+      <div className="relative z-10 flex h-full flex-col items-center justify-center px-6 text-center">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-amber-300/30 bg-black/40 px-4 py-1 text-[10px] uppercase tracking-[0.4em] text-amber-200/90 sm:text-xs">⛏ A Sandbox Survival Saga</div>
+        <h1 className="title-gradient text-6xl font-black leading-none drop-shadow-2xl sm:text-8xl md:text-9xl">TERRALITE</h1>
+        <p className="mt-2 text-base tracking-[0.4em] text-emerald-100/90 drop-shadow sm:text-xl">REALMS UNBOUND</p>
+        <p className="mt-5 max-w-md text-sm text-white/70 sm:text-base">Dig, build, craft and fight through a procedurally generated world. Mine the deep, forge your legend, and slay the Slime King.</p>
+        <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
+          <Btn variant="primary" className="px-12 py-4 text-lg" onClick={onPlay}>
+            ▶ Play
+          </Btn>
+          <Btn variant="ghost" onClick={onHowTo}>
+            How to Play
+          </Btn>
+        </div>
+        <div className="mt-6 flex gap-2">
+          <button onClick={toggleMusic} className="flex items-center gap-2 rounded-lg border border-white/15 bg-black/30 px-3 py-1.5 text-xs uppercase tracking-wider text-white/80 hover:bg-white/10">
+            {musicOn ? "🔊" : "🔇"} Music
+          </button>
+          <button onClick={toggleSfx} className="flex items-center gap-2 rounded-lg border border-white/15 bg-black/30 px-3 py-1.5 text-xs uppercase tracking-wider text-white/80 hover:bg-white/10">
+            {sfxOn ? "🔊" : "🔇"} Sound
+          </button>
+        </div>
+        <div className="absolute bottom-4 flex flex-col items-center gap-1 text-[11px] text-white/40">
+          <div>
+            Deepest Run · Day <span className="text-amber-200/80">{bestDay}</span>
+          </div>
+          <div>Free to play · a love letter to sandbox adventures</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StoryScreen({ onBegin, onBack }: { onBegin: () => void; onBack: () => void }) {
+  const [page, setPage] = useState(0);
+  const last = page === STORY.length - 1;
+  return (
+    <div className="anim-fade relative flex h-full w-full items-center justify-center bg-[#070a12] px-6">
+      <div className="pointer-events-none absolute inset-0 opacity-30" style={{ background: "radial-gradient(circle at 50% 30%, rgba(80,160,90,0.4), transparent 60%)" }} />
+      <div className="relative z-10 max-w-2xl text-center">
+        <div className="mb-8 text-xs uppercase tracking-[0.5em] text-emerald-300/70">Prologue</div>
+        <p key={page} className="anim-rise text-xl leading-relaxed text-white/90 sm:text-2xl" style={{ minHeight: "8em" }}>
+          {STORY[page]}
+        </p>
+        <div className="mt-10 flex items-center justify-center gap-2">
+          {STORY.map((_, i) => (
+            <span key={i} className={`h-1.5 rounded-full transition-all ${i === page ? "w-8 bg-amber-300" : "w-3 bg-white/20"}`} />
+          ))}
+        </div>
+        <div className="mt-8 flex items-center justify-center gap-3">
+          {page > 0 ? (
+            <Btn variant="ghost" onClick={() => setPage((p) => p - 1)}>
+              Back
+            </Btn>
+          ) : (
+            <Btn variant="ghost" onClick={onBack}>
+              Menu
+            </Btn>
+          )}
+          {last ? (
+            <Btn variant="primary" onClick={onBegin}>
+              Enter the World ▶
+            </Btn>
+          ) : (
+            <Btn variant="gold" onClick={() => setPage((p) => p + 1)}>
+              Continue
+            </Btn>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HowToScreen({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="anim-fade h-full w-full overflow-y-auto bg-[#070a12] px-6 py-10">
+      <div className="mx-auto max-w-2xl">
+        <h2 className="text-3xl font-bold text-amber-100 sm:text-4xl">How to Play</h2>
+        <p className="mt-2 text-sm text-white/55">A quick guide to surviving Terralite.</p>
+        <div className="mt-8 grid gap-4 sm:grid-cols-2">
+          {HOWTO.map((c) => (
+            <div key={c.h} className="rounded-2xl border border-emerald-300/20 bg-white/5 p-5">
+              <div className="mb-1.5 text-lg font-semibold text-emerald-100">{c.h}</div>
+              <div className="text-sm text-white/65">{c.t}</div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-6 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-100/80">
+          ⌨️ Controls: <b>WASD/Arrows</b> move · <b>Space</b> jump · <b>Left-Click</b> mine/attack · <b>Right-Click</b> place · <b>1–0</b> or scroll select · <b>E</b> inventory · <b>Esc</b> pause
+        </div>
+        <div className="mt-6 text-center">
+          <Btn variant="ghost" onClick={onBack}>
+            ← Back
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- App ----------------
+export default function App() {
+  const [screen, setScreen] = useState<Screen>("landing");
+  const [runId, setRunId] = useState(0);
+  const [startMode, setStartMode] = useState<"new" | "auto">("auto");
+  const [state, setState] = useState<EngineState | null>(null);
+  const [invOpen, setInvOpen] = useState(false);
+  const [pauseOpen, setPauseOpen] = useState(false);
+  const [ended, setEnded] = useState<null | "over" | "win">(null);
+  const [bestDay, setBestDay] = useState<number>(() => parseInt(ls.get("terralite_bestday", "0"), 10) || 0);
+  const [musicOn, setMusicOn] = useState<boolean>(() => ls.get("terralite_music", "1") !== "0");
+  const [sfxOn, setSfxOn] = useState<boolean>(() => ls.get("terralite_sfx", "1") !== "0");
+  const engineRef = useRef<Engine | null>(null);
+
+  // unlock audio
+  useEffect(() => {
+    const unlock = () => {
+      audio.ensure();
+      if (musicOn) audio.setTrack("menu");
+      window.removeEventListener("pointerdown", unlock);
+    };
+    window.addEventListener("pointerdown", unlock);
+    return () => window.removeEventListener("pointerdown", unlock);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    audio.setMusic(musicOn);
+    ls.set("terralite_music", musicOn ? "1" : "0");
+  }, [musicOn]);
+  useEffect(() => {
+    audio.setSfx(sfxOn);
+    ls.set("terralite_sfx", sfxOn ? "1" : "0");
+  }, [sfxOn]);
+
+  // sync engine UI/pause states
+  useEffect(() => {
+    engineRef.current?.setUiOpen(invOpen);
+    engineRef.current?.setPaused(pauseOpen);
+  }, [invOpen, pauseOpen]);
+
+  const onState = useCallback((s: EngineState) => setState(s), []);
+  const onGameOver = useCallback(() => {
+    setEnded("over");
+    const day = state?.dayCount ?? 1;
+    if (day > bestDay) {
+      setBestDay(day);
+      ls.set("terralite_bestday", String(day));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bestDay]);
+  const onVictory = useCallback(() => {
+    setEnded("win");
+    const day = state?.dayCount ?? 1;
+    if (day > bestDay) {
+      setBestDay(day);
+      ls.set("terralite_bestday", String(day));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bestDay]);
+
+  const click = () => audio.playSfx("click");
+
+  const beginGame = () => {
+    click();
+    setState(null);
+    setEnded(null);
+    setInvOpen(false);
+    setPauseOpen(false);
+    setStartMode("auto"); // продолжить сохранение, иначе новый мир
+    setRunId((r) => r + 1);
+    setScreen("playing");
+  };
+  const retry = () => {
+    click();
+    setState(null);
+    setEnded(null);
+    setInvOpen(false);
+    setPauseOpen(false);
+    setStartMode("new"); // начать заново (сбросить сохранение)
+    setRunId((r) => r + 1);
+    setScreen("playing");
+  };
+  const toMenu = () => {
+    click();
+    audio.setTrack("menu");
+    window.scrollTo(0, 0);
+    setScreen("landing");
+    setEnded(null);
+    setInvOpen(false);
+    setPauseOpen(false);
+  };
+  const selectSlot = (i: number) => {
+    engineRef.current?.selectSlot(i);
+  };
+
+  // keyboard for UI toggles
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (screen !== "playing") return;
+      if (e.code === "KeyE") {
+        e.preventDefault();
+        setInvOpen((v) => !v);
+        audio.playSfx("click");
+      } else if (e.code === "Escape") {
+        e.preventDefault();
+        if (invOpen) setInvOpen(false);
+        else setPauseOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [screen, invOpen]);
+
+  const playing = screen === "playing";
+
+  return (
+    <div className="relative h-screen w-screen overflow-hidden bg-[#070a12] text-white">
+      {playing && (
+        <div className="absolute inset-0">
+          <Stage runId={runId} mode={startMode} engineRef={engineRef} onState={onState} onGameOver={onGameOver} onVictory={onVictory} />
+          {state && !ended && <Hud s={state} onSelectSlot={selectSlot} onToggleInv={() => setInvOpen(true)} onPause={() => setPauseOpen(true)} />}
+          {state && invOpen && !ended && (
+            <InventoryPanel
+              s={state}
+              onClose={() => setInvOpen(false)}
+              onCraft={(id) => engineRef.current?.craft(id)}
+              onConsume={(id) => engineRef.current?.consume(id)}
+              onSummon={() => engineRef.current?.summonBoss()}
+              onSwap={(a, b) => engineRef.current?.swapSlots(a, b)}
+              onSelectSlot={(i) => engineRef.current?.selectSlot(i)}
+            />
+          )}
+          {pauseOpen && !ended && (
+            <div className="anim-fade absolute inset-0 z-20 flex items-center justify-center bg-black/70 backdrop-blur-md">
+              <div className="w-full max-w-sm text-center">
+                <div className="text-4xl font-bold text-white/90">Paused</div>
+                <div className="mt-6 flex flex-col items-center gap-3">
+                  <Btn variant="primary" onClick={() => setPauseOpen(false)}>
+                    Resume
+                  </Btn>
+                  <Btn variant="ghost" onClick={retry}>
+                    Restart World
+                  </Btn>
+                  <Btn variant="danger" onClick={toMenu}>
+                    Quit to Menu
+                  </Btn>
+                </div>
+                <div className="mt-5 flex justify-center gap-2">
+                  <button onClick={() => setMusicOn((v) => !v)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10">
+                    {musicOn ? "🔊" : "🔇"} Music
+                  </button>
+                  <button onClick={() => setSfxOn((v) => !v)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10">
+                    {sfxOn ? "🔊" : "🔇"} Sound
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {ended && state && (
+            <div className="anim-fade absolute inset-0 z-30 flex items-center justify-center px-6">
+              <div className="absolute inset-0" style={{ background: ended === "win" ? "radial-gradient(circle at 50% 40%, rgba(120,220,120,0.25), rgba(7,10,18,0.95))" : "radial-gradient(circle at 50% 40%, rgba(150,40,60,0.28), rgba(7,10,18,0.96))" }} />
+              <div className="relative z-10 w-full max-w-md text-center">
+                <div className={`text-5xl font-black sm:text-7xl ${ended === "win" ? "title-gradient" : "text-rose-300"}`}>{ended === "win" ? "VICTORY" : "YOU DIED"}</div>
+                <p className="mt-3 text-sm text-white/70 sm:text-base">
+                  {ended === "win" ? "The Slime King is vanquished. Light returns to Terralite — your saga is legend." : "The dark claimed you. But a new world awaits another survivor..."}
+                </p>
+                <div className="mx-auto mt-7 grid max-w-xs grid-cols-2 gap-3 text-left">
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <div className="text-[10px] uppercase tracking-widest text-white/45">Day Reached</div>
+                    <div className="text-xl font-bold text-amber-100">{state.dayCount}</div>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <div className="text-[10px] uppercase tracking-widest text-white/45">Quests</div>
+                    <div className="text-xl font-bold text-amber-100">{state.questDone ? "ALL" : "—"}</div>
+                  </div>
+                </div>
+                <div className="mt-8 flex justify-center gap-3">
+                  <Btn variant="primary" onClick={retry}>
+                    New World
+                  </Btn>
+                  <Btn variant="ghost" onClick={toMenu}>
+                    Main Menu
+                  </Btn>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {screen === "title" && (
+        <TitleScreen
+          onPlay={() => {
+            click();
+            setScreen("story");
+          }}
+          onHowTo={() => {
+            click();
+            setScreen("howto");
+          }}
+          bestDay={bestDay}
+          musicOn={musicOn}
+          sfxOn={sfxOn}
+          toggleMusic={() => setMusicOn((v) => !v)}
+          toggleSfx={() => setSfxOn((v) => !v)}
+        />
+      )}
+      {screen === "landing" && (
+        <Landing
+          onPlay={() => {
+            audio.ensure();
+            click();
+            beginGame();
+          }}
+        />
+      )}
+      {screen === "story" && <StoryScreen onBegin={beginGame} onBack={toMenu} />}
+      {screen === "howto" && <HowToScreen onBack={() => { click(); setScreen("landing"); }} />}
+    </div>
+  );
+}
