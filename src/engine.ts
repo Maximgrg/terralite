@@ -8,7 +8,7 @@ import {
 } from "./world";
 import { audio } from "./audio";
 import { tileTexture, wallTexture, TEX } from "./pixart";
-import { initSprites, getSprite, getWhite, type SpriteKey } from "./sprites";
+import { initSprites, getSprite } from "./sprites";
 import skyUrl from "./assets/bg_sky.jpg";
 
 const REACH = 5; // tiles
@@ -142,6 +142,7 @@ export class Engine {
   private mineTX = -1;
   private mineTY = -1;
   private mineProg = 0;
+  private mineSfxT = 0;
 
   // entities
   private enemies: Enemy[] = [];
@@ -261,6 +262,59 @@ export class Engine {
   }
   selectSlot(i: number) {
     if (i >= 0 && i < HOTBAR) this.selected = i;
+  }
+  // ---------- touch controls ----------
+  private placeMode = false;
+  private jumpBuffer = 0; // makes taps reliably trigger a jump
+  private jumpHeld = false;
+  private flying = false; // cheat: free flight
+  private godMode = false; // cheat: invincible
+  setMoveLeft(p: boolean) { this.keys["KeyA"] = p; }
+  setMoveRight(p: boolean) { this.keys["KeyD"] = p; }
+  jumpNow() {
+    // Immediate jump for touch controls. This avoids relying on "held" state
+    // and makes a short tap behave like a real mobile-game jump button.
+    if (this.flying) {
+      this.keys["Space"] = true;
+      return;
+    }
+    if (this.onGround) {
+      this.pvy = -JUMP_V;
+      this.onGround = false;
+      this.jumpBuffer = 0;
+      audio.playSfx("jump");
+    } else {
+      this.jumpBuffer = 0.18;
+    }
+  }
+  setJump(p: boolean) {
+    // rising edge -> jump immediately; release only stops flight ascend key.
+    if (p && !this.jumpHeld) this.jumpNow();
+    this.jumpHeld = p;
+    this.keys["Space"] = p;
+  }
+  togglePlaceMode(): boolean {
+    this.placeMode = !this.placeMode;
+    audio.playSfx("click");
+    return this.placeMode;
+  }
+  getPlaceMode(): boolean { return this.placeMode; }
+
+  // ---------- cheat / god menu ----------
+  toggleFly(): boolean { this.flying = !this.flying; return this.flying; }
+  toggleGod(): boolean { this.godMode = !this.godMode; return this.godMode; }
+  getFly(): boolean { return this.flying; }
+  getGod(): boolean { return this.godMode; }
+  healFull() { this.hp = this.maxHp; }
+  giveItem(id: string, n: number) { this.addItem(id, n); this.pushState(); this.saveGame(); }
+  setDay() { this.dayFrac = 0.0; }
+  setNight() { this.dayFrac = 0.5; }
+  nextOreTier(): void {
+    // give a full set of the best tools + materials
+    ["wood", "stone", "coal", "copper_ore", "iron_ore", "gold_ore", "diamond", "copper_bar", "iron_bar", "gold_bar"].forEach((id) => this.addItem(id, 30));
+    ["iron_pickaxe", "iron_sword", "gold_sword", "torch", "crown"].forEach((id) => this.addItem(id, 1));
+    this.pushState();
+    this.saveGame();
   }
   setSelectedByDelta(d: number) {
     let s = (this.selected + d) % HOTBAR;
@@ -536,19 +590,29 @@ export class Engine {
     this.md = (e) => {
       if (this.uiOpen) return;
       audio.ensure();
-      if (e.button === 0) this.mouseDown = true;
-      if (e.button === 2) {
+      // keep target tile in sync with the press location (important for touch)
+      const r = this.canvas.getBoundingClientRect();
+      this.mouseWX = (e.clientX - r.left) / r.width * this.viewW + this.camX;
+      this.mouseWY = (e.clientY - r.top) / r.height * this.viewH + this.camY;
+      this.mouseTX = Math.floor(this.mouseWX / TILE);
+      this.mouseTY = Math.floor(this.mouseWY / TILE);
+      const placing = this.placeMode || e.button === 2;
+      if (placing) {
         this.rightDown = true;
         this.tryPlace();
+      } else if (e.button === 0) {
+        this.mouseDown = true;
       }
     };
     this.mu = (e) => {
-      if (e.button === 0) {
+      const placing = this.placeMode || e.button === 2;
+      if (placing) {
+        this.rightDown = false;
+      } else if (e.button === 0) {
         this.mouseDown = false;
         this.mineTX = -1;
         this.mineProg = 0;
       }
-      if (e.button === 2) this.rightDown = false;
     };
     this.wh = (e) => {
       if (this.uiOpen) return;
@@ -710,22 +774,38 @@ export class Engine {
       this.pvx *= Math.pow(0.001, dt);
       if (Math.abs(this.pvx) < 4) this.pvx = 0;
     }
-    if ((this.keys["Space"] || this.keys["KeyW"] || this.keys["ArrowUp"]) && this.onGround) {
-      this.pvy = -JUMP_V;
+    if (this.flying) {
+      // free flight: no gravity. W/Up rises, S/Down descends.
+      this.pvy = 0;
+      if (this.keys["Space"] || this.keys["KeyW"] || this.keys["ArrowUp"]) this.pvy = -MOVE_SPEED * 1.4;
+      if (this.keys["KeyS"] || this.keys["ArrowDown"]) this.pvy = MOVE_SPEED * 1.4;
+      this.integrateX(dt, 18, 44);
+      this.py += this.pvy * dt;
       this.onGround = false;
-      audio.playSfx("jump");
+    } else {
+      // jump buffer: refresh while the jump key is held (covers keyboard Space
+      // and holding the touch button). A quick tap is remembered briefly so it
+      // still triggers; holding gives continuous hops when landing.
+      const jumpKey = this.keys["Space"] || this.keys["KeyW"] || this.keys["ArrowUp"];
+      if (jumpKey) this.jumpBuffer = 0.14;
+      else this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+      if (this.jumpBuffer > 0 && this.onGround) {
+        this.pvy = -JUMP_V;
+        this.onGround = false;
+        this.jumpBuffer = 0;
+        audio.playSfx("jump");
+      }
+      this.pvy += GRAVITY * dt;
+      if (this.pvy > 900) this.pvy = 900;
+      this.integrateX(dt, 18, 44);
+      const wasGround = this.onGround;
+      this.onGround = this.integrateY(dt, 18, 44);
+      if (!wasGround && this.onGround) audio.playSfx("land");
     }
-    this.pvy += GRAVITY * dt;
-    if (this.pvy > 900) this.pvy = 900;
-
-    this.integrateX(dt, 18, 44);
-    const wasGround = this.onGround;
-    this.onGround = this.integrateY(dt, 18, 44);
-    if (!wasGround && this.onGround) audio.playSfx("land");
 
     // world bounds
     this.px = Math.max(8, Math.min(this.world.w * TILE - 8, this.px));
-    if (this.py > this.world.h * TILE + 200) {
+    if (!this.flying && !this.godMode && this.py > this.world.h * TILE + 200) {
       this.hp = 0;
       this.die();
     }
@@ -799,9 +879,15 @@ export class Engine {
       this.mineTX = tx;
       this.mineTY = ty;
       this.mineProg = 0;
+      this.mineSfxT = 0; // play immediately on the first hit of a new block
     }
     this.mineProg += tool.power * dt * 3.2; // tune speed
-    audio.playSfx(id === STONE || id >= COPPER ? "mineStone" : "mine");
+    // periodic "tap" sound (NOT every frame — that sounded like a drill)
+    this.mineSfxT -= dt;
+    if (this.mineSfxT <= 0) {
+      this.mineSfxT = 0.18;
+      audio.playSfx(id === STONE || id >= COPPER ? "mineStone" : "mine");
+    }
     if (Math.random() < 0.5) this.dust(tx * TILE + 15, ty * TILE + 15, def.color);
     if (this.mineProg >= def.hp) {
       this.breakTile(tx, ty, id);
@@ -1043,7 +1129,7 @@ export class Engine {
   }
 
   private hurt(dmg: number) {
-    if (this.invuln > 0) return;
+    if (this.godMode || this.invuln > 0) return;
     const real = Math.max(1, dmg - this.defense);
     this.hp -= real;
     this.invuln = 0.8;
@@ -1685,20 +1771,6 @@ export class Engine {
     ctx.drawImage(spr, 0, 0, sw, sh, -dw / 2, -h, dw, h);
     ctx.restore();
   }
-  /** Draw a sprite centered at (cx,cy). */
-  private blitCenter(ctx: CanvasRenderingContext2D, spr: HTMLCanvasElement, cx: number, cy: number, h: number, facing: number, rot = 0) {
-    const sw = spr.width, sh = spr.height;
-    const scale = h / sh;
-    const dw = sw * scale;
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    ctx.translate(cx, cy);
-    if (rot) ctx.rotate(rot);
-    ctx.scale(facing, 1);
-    ctx.drawImage(spr, 0, 0, sw, sh, -dw / 2, -h / 2, dw, h);
-    ctx.restore();
-  }
-
   private drawTool(ctx: CanvasRenderingContext2D, x: number, y: number) {
     const s = this.selectedSlot();
     const hasTool = s && ITEMS[s.id]?.kind === "tool";
@@ -1708,44 +1780,118 @@ export class Engine {
     ctx.scale(this.pface, 1);
     ctx.translate(7, -4);
     ctx.rotate(-0.25 - swing * 1.7);
-    // forearm
+    // forearm + wooden handle
     ctx.fillStyle = "#f0c08a";
     ctx.fillRect(0, 0, 5, 11);
     if (hasTool) {
       const it = ITEMS[s!.id];
+      // BOLD material palette — each tier is unmistakably different.
+      const mat: Record<string, { h: string; d: string; shaft: string; gem?: string }> = {
+        wood: { h: "#c08a4e", d: "#7c5226", shaft: "#8a5a2c" },
+        stone: { h: "#b4bac6", d: "#5c606c", shaft: "#7c5226" },
+        copper: { h: "#f0933f", d: "#9c5018", shaft: "#7c5226" },
+        iron: { h: "#eef2f8", d: "#8c93a3", shaft: "#5a3a22" },
+        gold: { h: "#ffd23b", d: "#b8860b", shaft: "#5a3a22", gem: "#ff3b6d" },
+      };
+      const prefix = s!.id.split("_")[0];
+      const m = mat[prefix] ?? mat.wood;
+      const gem = m.gem;
+      const OL = "#1a1408";
       ctx.translate(2, 0);
       ctx.rotate(0.35);
+      // shared shaft (handle), color shifts for higher tiers
+      ctx.strokeStyle = m.shaft;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, 18);
+      ctx.stroke();
+
       if (it.tool === "pickaxe") {
-        ctx.strokeStyle = it.color;
-        ctx.lineWidth = 4;
+        // pick head: outlined dark back, bright front, gem for gold
+        ctx.strokeStyle = OL;
+        ctx.lineWidth = 7;
         ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(0, 17);
+        ctx.moveTo(-11, 14);
+        ctx.quadraticCurveTo(0, 7, 11, 14);
         ctx.stroke();
-        ctx.fillStyle = it.color;
-        ctx.fillRect(-7, 13, 14, 4);
+        ctx.strokeStyle = m.d;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(-11, 14);
+        ctx.quadraticCurveTo(0, 8, 11, 14);
+        ctx.stroke();
+        ctx.strokeStyle = m.h;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(-10, 13);
+        ctx.quadraticCurveTo(0, 9, 10, 13);
+        ctx.stroke();
+        if (gem) { ctx.fillStyle = gem; ctx.fillRect(-2, 10, 3, 3); }
       } else if (it.tool === "sword") {
-        ctx.fillStyle = "#caa06a";
-        ctx.fillRect(-3, -2, 6, 3);
-        ctx.fillStyle = it.color;
-        ctx.fillRect(-2, -2, 4, 4);
-        ctx.fillRect(-1, -20, 2, 20);
-        ctx.fillStyle = "rgba(255,255,255,0.5)";
-        ctx.fillRect(0, -19, 1, 16);
-      } else if (it.tool === "axe") {
-        ctx.strokeStyle = it.color;
-        ctx.lineWidth = 4;
+        // crossguard
+        ctx.fillStyle = gem ? "#ffd23b" : "#9a6a3a";
+        ctx.fillRect(-6, 0, 12, 3);
+        ctx.fillStyle = OL;
+        ctx.fillRect(-2, 1, 4, 5);
+        // blade with outline, color strongly by material
+        ctx.fillStyle = OL;
         ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(0, 17);
-        ctx.stroke();
-        ctx.fillStyle = it.color;
-        ctx.beginPath();
-        ctx.moveTo(0, 11);
-        ctx.lineTo(11, 6);
-        ctx.lineTo(11, 15);
+        ctx.moveTo(-3.5, 0);
+        ctx.lineTo(3.5, 0);
+        ctx.lineTo(2.5, -23);
+        ctx.lineTo(0, -28);
+        ctx.lineTo(-2.5, -23);
         ctx.closePath();
         ctx.fill();
+        ctx.fillStyle = m.d;
+        ctx.beginPath();
+        ctx.moveTo(-3, 0);
+        ctx.lineTo(3, 0);
+        ctx.lineTo(2, -22);
+        ctx.lineTo(0, -26);
+        ctx.lineTo(-2, -22);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = m.h;
+        ctx.beginPath();
+        ctx.moveTo(-2, 0);
+        ctx.lineTo(2, 0);
+        ctx.lineTo(1, -20);
+        ctx.lineTo(0, -24);
+        ctx.lineTo(-1, -20);
+        ctx.closePath();
+        ctx.fill();
+        // shine streak
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.fillRect(0, -23, 1, 19);
+        if (gem) { ctx.fillStyle = gem; ctx.fillRect(-1.5, 2, 3, 3); }
+      } else if (it.tool === "axe") {
+        // axe head with outline, color by material
+        ctx.fillStyle = OL;
+        ctx.beginPath();
+        ctx.moveTo(0, 4);
+        ctx.quadraticCurveTo(15, 5, 15, 15);
+        ctx.lineTo(12, 19);
+        ctx.lineTo(0, 15);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = m.d;
+        ctx.beginPath();
+        ctx.moveTo(0, 5);
+        ctx.quadraticCurveTo(14, 6, 14, 14);
+        ctx.lineTo(11, 18);
+        ctx.lineTo(0, 14);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = m.h;
+        ctx.beginPath();
+        ctx.moveTo(0, 6);
+        ctx.quadraticCurveTo(12, 7, 12, 13);
+        ctx.lineTo(0, 13);
+        ctx.closePath();
+        ctx.fill();
+        if (gem) { ctx.fillStyle = gem; ctx.fillRect(7, 9, 3, 3); }
       }
     }
     ctx.restore();
@@ -1763,35 +1909,7 @@ export class Engine {
     ctx.fill();
     ctx.restore();
 
-    // ---- painted sprite (preferred) ----
-    const key: SpriteKey | null =
-      e.type === "slime" ? "slime" : e.type === "zombie" ? "zombie" : e.type === "bat" ? "bat" : e.type === "king" ? "king" : null;
-    const spr = key ? getSprite(key) : null;
-    if (spr) {
-      if (e.type === "bat") {
-        const tilt = Math.sin(e.t * 10) * 0.12;
-        const bob = Math.sin(e.t * 6) * 2;
-        this.blitCenter(ctx, spr, e.x, e.y + bob, e.h + 8, e.facing, tilt);
-      } else {
-        const footY = e.y + e.h / 2;
-        const squish = e.onGround ? 1 + Math.sin(e.t * 3) * 0.03 : 0.86;
-        const hPx = e.type === "king" ? e.h + 34 : e.h + 6;
-        this.blitFeet(ctx, spr, e.x, footY, hPx, e.facing, squish);
-      }
-      if (flash) {
-        const white = getWhite(key!);
-        if (white) {
-          ctx.save();
-          ctx.globalAlpha = 0.75;
-          if (e.type === "bat") this.blitCenter(ctx, white, e.x, e.y, e.h + 8, e.facing);
-          else this.blitFeet(ctx, white, e.x, e.y + e.h / 2, e.type === "king" ? e.h + 34 : e.h + 6, e.facing, e.onGround ? 1 : 0.86);
-          ctx.restore();
-        }
-      }
-      return;
-    }
-
-    // ---- procedural fallback ----
+    // ---- procedural models (each enemy has a distinct, unique appearance) ----
     ctx.save();
     ctx.translate(e.x, e.y);
     if (e.type === "slime" || e.type === "king") {
@@ -1926,12 +2044,6 @@ export class Engine {
   private drawLighting(tx0: number, ty0: number, tx1: number, ty1: number, bright: number) {
     const ctx = this.ctx;
     const night = this.isNightNow();
-    // PERFORMANCE: when it's bright day AND the player is near the surface,
-    // there's essentially no darkness to draw — skip the whole lighting pass.
-    const ptx = Math.floor(this.px / TILE);
-    const surfHere = this.world.surfaceY[ptx];
-    const depth = this.py / TILE - surfHere;
-    if (!night && bright > 0.92 && depth < 4) return;
 
     const gw = tx1 - tx0 + 1;
     const gh = ty1 - ty0 + 1;

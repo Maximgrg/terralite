@@ -4,6 +4,8 @@ import { ITEMS, RECIPES, type Station } from "./world";
 import { audio } from "./audio";
 import bg from "./assets/sandbox-bg.jpg";
 import Landing from "./Landing";
+import MobileGate, { goFullscreen } from "./MobileGate";
+import CheatMenu from "./CheatMenu";
 
 type Screen = "landing" | "title" | "story" | "howto" | "playing";
 
@@ -47,6 +49,27 @@ function itemIcon(id: string) {
 }
 function itemName(id: string) {
   return ITEMS[id]?.name ?? id;
+}
+/** Tint behind tool icons so each material is visually distinct. */
+function itemTint(id: string): string | undefined {
+  const it = ITEMS[id];
+  if (it?.kind !== "tool") return undefined;
+  return it.color; // wood brown, stone gray, copper orange, iron steel, gold
+}
+/** Renders an item icon, tinted by material for tools. */
+function ItemGlyph({ id, className = "text-xl" }: { id: string; className?: string }) {
+  const tint = itemTint(id);
+  if (tint) {
+    return (
+      <span
+        className={`inline-flex items-center justify-center rounded-md ${className}`}
+        style={{ background: tint + "33", boxShadow: `inset 0 0 0 1px ${tint}66` }}
+      >
+        {itemIcon(id)}
+      </span>
+    );
+  }
+  return <span className={className}>{itemIcon(id)}</span>;
 }
 
 function Btn({
@@ -125,7 +148,7 @@ function Hearts({ hp, maxHp }: { hp: number; maxHp: number }) {
         const full = hp >= (i + 1) * 20;
         const half = !full && hp > i * 20;
         return (
-          <span key={i} className="text-base leading-none drop-shadow" style={{ filter: full || half ? "drop-shadow(0 0 4px rgba(255,80,110,0.6))" : "none" }}>
+          <span key={i} className="text-xs leading-none drop-shadow sm:text-base" style={{ filter: full || half ? "drop-shadow(0 0 4px rgba(255,80,110,0.6))" : "none" }}>
             {full ? "❤️" : half ? "❤" : "🤍"}
           </span>
         );
@@ -140,11 +163,11 @@ function Clock({ dayFrac, isNight, dayCount }: { dayFrac: number; isNight: boole
   const m = Math.floor((total - h) * 60);
   const t = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
   return (
-    <div className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-black/50 px-3 py-1 text-sm">
+    <div className="flex items-center gap-1 rounded-lg border border-white/15 bg-black/50 px-2 py-0.5 text-xs sm:gap-1.5 sm:px-3 sm:py-1 sm:text-sm">
       <span>{isNight ? "🌙" : "☀️"}</span>
       <span className="tabular-nums text-white/90">{t}</span>
       <span className="text-white/40">·</span>
-      <span className="text-white/60">Day {dayCount}</span>
+      <span className="text-white/60">D{dayCount}</span>
     </div>
   );
 }
@@ -163,41 +186,40 @@ function Hud({
   return (
     <div className="pointer-events-none absolute inset-0 select-none">
       {/* top-left vitals */}
-      <div className="absolute left-3 top-3 space-y-1">
+      <div className="absolute left-2 top-2 space-y-0.5 sm:left-3 sm:top-3 sm:space-y-1">
         <Hearts hp={s.hp} maxHp={s.maxHp} />
-        <div className="text-xs text-rose-100/80">
-          {s.hp} / {s.maxHp} HP{s.defense > 0 ? `  ·  🛡 ${s.defense} def` : ""}
+        <div className="text-[10px] text-rose-100/80 sm:text-xs">
+          {s.hp}/{s.maxHp}{s.defense > 0 ? ` ·🛡${s.defense}` : ""}
         </div>
       </div>
 
       {/* top-center clock */}
-      <div className="absolute left-1/2 top-3 -translate-x-1/2">
+      <div className="absolute left-1/2 top-2 -translate-x-1/2 sm:top-3">
         <Clock dayFrac={s.dayFrac} isNight={s.isNight} dayCount={s.dayCount} />
-        <div className="mt-1 text-center text-[11px] uppercase tracking-widest text-white/50">{s.depth > 0 ? `Underground · ${s.depth}m` : "Surface"}</div>
       </div>
 
       {/* top-right quest + buttons */}
-      <div className="absolute right-3 top-3 flex flex-col items-end gap-2">
-        <div className="flex gap-2">
-          <button onClick={onToggleInv} className="pointer-events-auto rounded-lg border border-white/15 bg-black/50 px-3 py-1.5 text-sm text-white/85 hover:bg-white/10">
-            🎒 <span className="hidden sm:inline">Inventory</span> <span className="text-white/40">(E)</span>
+      <div className="absolute right-2 top-2 flex flex-col items-end gap-1.5 sm:right-3 sm:top-3 sm:gap-2">
+        <div className="flex gap-1.5 sm:gap-2">
+          <button onClick={onToggleInv} className="pointer-events-auto rounded-lg border border-white/15 bg-black/50 px-2.5 py-1.5 text-sm text-white/85 hover:bg-white/10 sm:px-3">
+            🎒<span className="ml-1 hidden sm:inline">Inventory</span>
           </button>
-          <button onClick={onPause} className="pointer-events-auto rounded-lg border border-white/15 bg-black/50 px-3 py-1.5 text-sm text-white/85 hover:bg-white/10">
+          <button onClick={onPause} className="pointer-events-auto rounded-lg border border-white/15 bg-black/50 px-2.5 py-1.5 text-sm text-white/85 hover:bg-white/10 sm:px-3">
             ❚❚
           </button>
         </div>
-        <div className="pointer-events-none w-56 rounded-xl border border-emerald-300/20 bg-black/55 p-2.5 backdrop-blur-sm">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-300/80">{s.questDone ? "All Complete" : "Quest"}</div>
-          <div className="text-sm font-semibold text-white/90">{s.questTitle}</div>
-          <div className="text-xs text-white/60">{s.questText}</div>
+        <div className="pointer-events-none w-40 rounded-lg border border-emerald-300/20 bg-black/55 p-1.5 backdrop-blur-sm sm:w-56 sm:rounded-xl sm:p-2.5">
+          <div className="text-[9px] uppercase tracking-[0.15em] text-emerald-300/80 sm:text-[10px] sm:tracking-[0.2em]">{s.questDone ? "All Complete" : "Quest"}</div>
+          <div className="truncate text-xs font-semibold text-white/90 sm:text-sm">{s.questTitle}</div>
+          <div className="truncate text-[11px] text-white/60 sm:text-xs">{s.questText}</div>
         </div>
       </div>
 
       {/* boss bar */}
       {s.boss && (
-        <div className="absolute bottom-24 left-1/2 w-[80%] max-w-xl -translate-x-1/2">
-          <div className="mb-1 text-center text-sm font-semibold text-emerald-200">{s.boss.name}</div>
-          <div className="h-3 w-full overflow-hidden rounded-full bg-black/70 ring-1 ring-emerald-400/30">
+        <div className="absolute bottom-44 left-1/2 w-[80%] max-w-xl -translate-x-1/2 sm:bottom-24">
+          <div className="mb-1 text-center text-xs font-semibold text-emerald-200 sm:text-sm">{s.boss.name}</div>
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/70 ring-1 ring-emerald-400/30 sm:h-3">
             <div className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-lime-400 transition-[width] duration-150" style={{ width: `${(s.boss.hp / s.boss.maxHp) * 100}%` }} />
           </div>
         </div>
@@ -211,24 +233,150 @@ function Hud({
         </div>
       )}
 
-      {/* hotbar */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2">
-        <div className="flex gap-1 rounded-2xl border border-white/10 bg-black/50 p-1.5 backdrop-blur-sm">
+      {/* hotbar — sits ABOVE the touch controls on mobile */}
+      <div className="absolute bottom-24 left-1/2 w-[94%] max-w-md -translate-x-1/2 sm:bottom-3">
+        <div className="flex gap-0.5 rounded-2xl border border-white/10 bg-black/50 p-1 backdrop-blur-sm sm:gap-1 sm:p-1.5">
           {s.inventory.slice(0, 10).map((slot, i) => (
             <button
               key={i}
               onClick={() => onSelectSlot(i)}
-              className={`pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-lg border text-2xl transition-all sm:h-14 sm:w-14 ${
+              className={`pointer-events-auto relative flex h-9 w-[10%] items-center justify-center rounded-lg border text-base transition-all sm:h-14 sm:text-2xl ${
                 s.selected === i ? "border-amber-300 bg-amber-300/20 ring-2 ring-amber-300/50" : "border-white/10 bg-white/5 hover:bg-white/10"
               }`}
             >
-              <span className="absolute left-1 top-0.5 text-[9px] text-white/40">{(i + 1) % 10}</span>
-              {slot && <span>{itemIcon(slot.id)}</span>}
-              {slot && slot.count > 1 && <span className="absolute bottom-0.5 right-1 text-[10px] font-bold text-white">{slot.count}</span>}
+              <span className="absolute left-0.5 top-0 text-[7px] text-white/40 sm:text-[9px]">{(i + 1) % 10}</span>
+              {slot && <ItemGlyph id={slot.id} className="text-base sm:text-2xl" />}
+              {slot && slot.count > 1 && <span className="absolute bottom-0 right-0.5 text-[9px] font-bold text-white sm:text-[10px]">{slot.count}</span>}
             </button>
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------- Touch controls (mobile) ----------------
+// Native low-latency touch button: attaches real touchstart/touchend listeners
+// (bypassing React's synthetic event layer) for the minimum possible delay.
+function TouchBtn({
+  onDown,
+  onUp,
+  className,
+  children,
+  title,
+}: {
+  onDown: () => void;
+  onUp: () => void;
+  className: string;
+  children: React.ReactNode;
+  title?: string;
+}) {
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const downRef = useRef(onDown);
+  const upRef = useRef(onUp);
+  downRef.current = onDown;
+  upRef.current = onUp;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // PURE touch handling, tracked per-finger (touchIdentifier). No pointer or
+    // mouse events: mobile browsers synthesize mouse events ~300ms after touch,
+    // which were racing with touchend and resetting movement. preventDefault on
+    // a non-passive listener also suppresses that synthesis and the 300ms delay.
+    let myTouch: number | null = null;
+    const td = (e: TouchEvent) => {
+      e.preventDefault();
+      if (myTouch !== null) return; // already pressed by another finger
+      myTouch = e.changedTouches[0].identifier;
+      downRef.current();
+    };
+    const release = () => {
+      if (myTouch === null) return;
+      myTouch = null;
+      upRef.current();
+    };
+    const tu = (e: TouchEvent) => {
+      // only release when OUR finger lifts
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === myTouch) {
+          e.preventDefault();
+          release();
+          return;
+        }
+      }
+    };
+    el.addEventListener("touchstart", td, { passive: false });
+    el.addEventListener("touchend", tu, { passive: false });
+    el.addEventListener("touchcancel", tu, { passive: false });
+    return () => {
+      el.removeEventListener("touchstart", td);
+      el.removeEventListener("touchend", tu);
+      el.removeEventListener("touchcancel", tu);
+    };
+  }, []);
+  return (
+    <button
+      ref={ref}
+      title={title}
+      className={`touch-btn ${className}`}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TouchControls({
+  engineRef,
+}: {
+  engineRef: React.MutableRefObject<Engine | null>;
+}) {
+  const btn =
+    "pointer-events-auto select-none flex items-center justify-center rounded-full border border-white/25 bg-black/40 backdrop-blur-sm active:bg-white/30";
+  const noop = () => {};
+  const [placeMode, setPlaceMode] = useState(false);
+  const togglePlace = () => {
+    const v = engineRef.current?.togglePlaceMode() ?? false;
+    setPlaceMode(v);
+  };
+  return (
+    <div className="pointer-events-none absolute inset-0 z-30 select-none">
+      {/* movement — bottom left, pulled INWARD clear of Android's back-gesture zone */}
+      <div
+        className="absolute flex items-end gap-2"
+        style={{
+          left: "calc(26px + env(safe-area-inset-left))",
+          bottom: "calc(18px + env(safe-area-inset-bottom))",
+        }}
+      >
+        <TouchBtn onDown={() => engineRef.current?.setMoveLeft(true)} onUp={() => engineRef.current?.setMoveLeft(false)} className={`${btn} h-16 w-16 text-3xl text-white`}>
+          ◀
+        </TouchBtn>
+        <TouchBtn onDown={() => engineRef.current?.setMoveRight(true)} onUp={() => engineRef.current?.setMoveRight(false)} className={`${btn} h-16 w-16 text-3xl text-white`}>
+          ▶
+        </TouchBtn>
+      </div>
+
+      {/* actions — bottom right, also clear of the right-edge gesture zone */}
+      <div
+        className="absolute flex items-end gap-2"
+        style={{
+          right: "calc(26px + env(safe-area-inset-right))",
+          bottom: "calc(18px + env(safe-area-inset-bottom))",
+        }}
+      >
+        <TouchBtn onDown={togglePlace} onUp={noop} className={`${btn} h-14 w-14 text-xl ${placeMode ? "border-amber-300 bg-amber-400/40" : "text-white/70"}`} title="Режим строительства">
+          🧱
+        </TouchBtn>
+        <TouchBtn onDown={() => engineRef.current?.jumpNow()} onUp={noop} className={`${btn} h-[4.5rem] w-[4.5rem] text-3xl text-white`}>
+          ⤴
+        </TouchBtn>
+      </div>
+      {placeMode && (
+        <div className="pointer-events-none absolute bottom-28 right-6 rounded-full bg-amber-400/20 px-3 py-1 text-[10px] text-amber-100">
+          Режим строительства: тапни, куда поставить блок
+        </div>
+      )}
     </div>
   );
 }
@@ -252,8 +400,7 @@ function InventoryPanel({
   onSelectSlot: (i: number) => void;
 }) {
   const sel = s.inventory[s.selected];
-  const dragIndex = useRef<number | null>(null);
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const [tapSel, setTapSel] = useState<number | null>(null); // tap-to-move (desktop + mobile)
   return (
     <div className="anim-fade absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
       <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0c0f1a]/95 shadow-2xl">
@@ -273,66 +420,49 @@ function InventoryPanel({
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-white/40">
               <span>Items</span>
-              <span className="normal-case tracking-normal text-white/25">· перетаскивай предметы между ячейками</span>
+              <span className="normal-case tracking-normal text-white/25">· тапни слот, затем тапни другой — предмет переместится</span>
             </div>
             <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8">
               {s.inventory.map((slot, i) => {
-                const dragging = dragIndex.current === i;
-                const hovered = hoverIndex === i && dragIndex.current !== null && dragIndex.current !== i;
+                const selectedSrc = tapSel === i;
+                const isHotbarTarget = tapSel !== null && tapSel !== i;
                 return (
-                  <div
+                  <button
                     key={i}
-                    draggable={!!slot}
-                    onDragStart={(e) => {
-                      dragIndex.current = i;
-                      e.dataTransfer.effectAllowed = "move";
-                      try {
-                        e.dataTransfer.setData("text/plain", String(i));
-                      } catch {
-                        /* ignore */
+                    onClick={() => {
+                      audio.playSfx("click");
+                      if (tapSel === null) {
+                        // first tap: pick up this slot
+                        setTapSel(i);
+                        if (i < 10) onSelectSlot(i);
+                      } else if (tapSel === i) {
+                        // tap same slot again: cancel
+                        setTapSel(null);
+                      } else {
+                        // tap another slot: move/swap/merge
+                        onSwap(tapSel, i);
+                        setTapSel(null);
                       }
                     }}
-                    onDragEnd={() => {
-                      dragIndex.current = null;
-                      setHoverIndex(null);
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = "move";
-                      if (hoverIndex !== i) setHoverIndex(i);
-                    }}
-                    onDragLeave={() => {
-                      if (hoverIndex === i) setHoverIndex(null);
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const from = dragIndex.current;
-                      dragIndex.current = null;
-                      setHoverIndex(null);
-                      if (from !== null && from !== i) onSwap(from, i);
-                    }}
-                    onClick={() => {
-                      // single click on a hotbar slot selects it
-                      if (i < 10) onSelectSlot(i);
-                    }}
                     title={slot ? `${itemName(slot.id)} ×${slot.count}` : ""}
-                    className={`relative flex aspect-square cursor-grab items-center justify-center rounded-lg border text-xl transition-colors active:cursor-grabbing ${
-                      i === s.selected
+                    className={`relative flex aspect-square cursor-pointer items-center justify-center rounded-lg border text-xl transition-all ${
+                      selectedSrc
+                        ? "border-sky-300 bg-sky-400/30 ring-2 ring-sky-300 scale-105"
+                        : isHotbarTarget
+                        ? "border-emerald-300/60 bg-emerald-300/10 hover:bg-emerald-300/20"
+                        : i === s.selected
                         ? "border-amber-300 bg-amber-300/20"
-                        : hovered
-                        ? "border-emerald-300 bg-emerald-300/20"
                         : i < 10
-                        ? "border-white/15 bg-white/5"
-                        : "border-white/5 bg-black/30"
-                    } ${dragging ? "opacity-30" : ""}`}
+                        ? "border-white/15 bg-white/5 hover:bg-white/10"
+                        : "border-white/5 bg-black/30 hover:bg-white/5"
+                    }`}
                   >
-                    {slot && <span className="pointer-events-none select-none">{itemIcon(slot.id)}</span>}
+                    {slot && <ItemGlyph id={slot.id} className="pointer-events-none select-none text-xl" />}
                     {slot && slot.count > 1 && (
                       <span className="pointer-events-none absolute bottom-0 right-0.5 text-[10px] font-bold text-white">{slot.count}</span>
                     )}
                     {i < 10 && <span className="pointer-events-none absolute left-0.5 top-0 text-[8px] text-white/30">{(i + 1) % 10}</span>}
-                    {hovered && <span className="pointer-events-none absolute inset-0 rounded-lg ring-2 ring-emerald-300/70" />}
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -539,6 +669,7 @@ export default function App() {
   const [state, setState] = useState<EngineState | null>(null);
   const [invOpen, setInvOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
+  const [cheatOpen, setCheatOpen] = useState(false);
   const [ended, setEnded] = useState<null | "over" | "win">(null);
   const [bestDay, setBestDay] = useState<number>(() => parseInt(ls.get("terralite_bestday", "0"), 10) || 0);
   const [musicOn, setMusicOn] = useState<boolean>(() => ls.get("terralite_music", "1") !== "0");
@@ -568,9 +699,9 @@ export default function App() {
 
   // sync engine UI/pause states
   useEffect(() => {
-    engineRef.current?.setUiOpen(invOpen);
+    engineRef.current?.setUiOpen(invOpen || cheatOpen);
     engineRef.current?.setPaused(pauseOpen);
-  }, [invOpen, pauseOpen]);
+  }, [invOpen, pauseOpen, cheatOpen]);
 
   const onState = useCallback((s: EngineState) => setState(s), []);
   const onGameOver = useCallback(() => {
@@ -646,13 +777,48 @@ export default function App() {
   }, [screen, invOpen]);
 
   const playing = screen === "playing";
+  const [isTouch, setIsTouch] = useState(false);
+  useEffect(() => {
+    setIsTouch(typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0));
+  }, []);
+
+  // SECRET GOD MENU: hold ALL of F1..F10 at once to open it.
+  const fkeys = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const codes = Array.from({ length: 10 }, (_, i) => `F${i + 1}`);
+    const kd = (e: KeyboardEvent) => {
+      if (codes.includes(e.code)) {
+        e.preventDefault();
+        fkeys.current.add(e.code);
+        if (fkeys.current.size >= 10) setCheatOpen(true);
+      }
+    };
+    const ku = (e: KeyboardEvent) => {
+      if (codes.includes(e.code)) {
+        e.preventDefault();
+        fkeys.current.delete(e.code);
+      }
+    };
+    window.addEventListener("keydown", kd);
+    window.addEventListener("keyup", ku);
+    return () => {
+      window.removeEventListener("keydown", kd);
+      window.removeEventListener("keyup", ku);
+    };
+  }, []);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#070a12] text-white">
+      <MobileGate onPlay={beginGame} />
       {playing && (
         <div className="absolute inset-0">
           <Stage runId={runId} mode={startMode} engineRef={engineRef} onState={onState} onGameOver={onGameOver} onVictory={onVictory} />
           {state && !ended && <Hud s={state} onSelectSlot={selectSlot} onToggleInv={() => setInvOpen(true)} onPause={() => setPauseOpen(true)} />}
+          {isTouch && state && !ended && !invOpen && !pauseOpen && (
+            <TouchControls
+              engineRef={engineRef}
+            />
+          )}
           {state && invOpen && !ended && (
             <InventoryPanel
               s={state}
@@ -679,7 +845,10 @@ export default function App() {
                     Quit to Menu
                   </Btn>
                 </div>
-                <div className="mt-5 flex justify-center gap-2">
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  <button onClick={goFullscreen} className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-400/20">
+                    📺 Полный экран
+                  </button>
                   <button onClick={() => setMusicOn((v) => !v)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10">
                     {musicOn ? "🔊" : "🔇"} Music
                   </button>
@@ -750,6 +919,7 @@ export default function App() {
       )}
       {screen === "story" && <StoryScreen onBegin={beginGame} onBack={toMenu} />}
       {screen === "howto" && <HowToScreen onBack={() => { click(); setScreen("landing"); }} />}
+      {cheatOpen && playing && <CheatMenu engineRef={engineRef} onClose={() => setCheatOpen(false)} />}
     </div>
   );
 }
