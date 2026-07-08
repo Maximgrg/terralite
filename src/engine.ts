@@ -178,6 +178,9 @@ export class Engine {
   private fpsFrames = 0;
   private fpsTimer = 0;
 
+  // pre-rendered glow sprite (cached for performance)
+  private glowSprite: HTMLCanvasElement | null = null;
+
   // painted sky backdrop (loaded async)
   private skyImg: HTMLCanvasElement | null = null;
 
@@ -219,6 +222,7 @@ export class Engine {
     this.camY = this.py - 300;
     this.attach();
     this.resize();
+    this.buildGlowSprite();
     initSprites();
     // load painted sky backdrop
     const im = new Image();
@@ -591,13 +595,26 @@ export class Engine {
     const parent = this.canvas.parentElement;
     const cw = parent ? parent.clientWidth : window.innerWidth;
     const ch = parent ? parent.clientHeight : window.innerHeight;
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.viewW = cw;
-    this.viewH = ch;
+    this.dpr = 1; // cap to 1 for max FPS in Canvas2D (avoids 4K overdraw)
+    // PERFORMANCE: render at a capped internal resolution and let CSS upscale.
+    // This drastically cuts the number of tiles to draw (and pixels to shade)
+    // while keeping pixel-art crisp via nearest-neighbour scaling.
+    const MAX_W = 1000;
+    let rw = cw;
+    let rh = ch;
+    if (cw > MAX_W) {
+      const s = MAX_W / cw;
+      rw = MAX_W;
+      rh = Math.max(1, Math.round(ch * s));
+    }
+    this.viewW = rw;
+    this.viewH = rh;
+    // canvas element fills the screen (CSS size)...
     this.canvas.style.width = cw + "px";
     this.canvas.style.height = ch + "px";
-    this.canvas.width = Math.round(cw * this.dpr);
-    this.canvas.height = Math.round(ch * this.dpr);
+    // ...but the backing store is the smaller logical size (fast to draw).
+    this.canvas.width = rw;
+    this.canvas.height = rh;
   }
 
   // ---------- loop ----------
@@ -1205,7 +1222,7 @@ export class Engine {
       }
     }
 
-    // foreground tiles (blit pixel-art textures)
+    // foreground tiles (direct blit with cheap AO overlays)
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const id = getTile(this.world, tx, ty);
@@ -1287,32 +1304,52 @@ export class Engine {
     }
   }
 
+  private buildGlowSprite() {
+    const size = 128;
+    const cv = document.createElement("canvas");
+    cv.width = size;
+    cv.height = size;
+    const c = cv.getContext("2d")!;
+    // soft halo: gentle falloff so it never looks like a bright "sun" dot
+    const g = c.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    g.addColorStop(0, "rgba(255,255,255,0.5)");
+    g.addColorStop(0.4, "rgba(255,255,255,0.18)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    c.fillStyle = g;
+    c.fillRect(0, 0, size, size);
+    this.glowSprite = cv;
+  }
+
   private drawGlow(ctx: CanvasRenderingContext2D, tx0: number, ty0: number, tx1: number, ty1: number) {
     const night = this.isNightNow();
+    if (!this.glowSprite) return;
+    const spr = this.glowSprite;
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
+    ctx.globalCompositeOperation = "lighter"; // additive glow
     ctx.translate(-Math.round(this.camX), -Math.round(this.camY));
-    const glow = (wx: number, wy: number, r: number, col: string) => {
-      const g = ctx.createRadialGradient(wx, wy, 0, wx, wy, r);
-      g.addColorStop(0, col);
-      g.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(wx - r, wy - r, r * 2, r * 2);
-    };
-    // player aura
-    glow(this.px, this.py - 4, TILE * 2.4, night ? "rgba(150,200,255,0.16)" : "rgba(255,240,200,0.06)");
+
+    // player aura — subtle, just enough to feel alive in the dark (NOT a sun)
+    const pr = TILE * 2.2;
+    ctx.globalAlpha = night ? 0.1 : 0.03;
+    ctx.drawImage(spr, 0, 0, spr.width, spr.height, this.px - pr, this.py - 4 - pr, pr * 2, pr * 2);
+
     // emissive tiles
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const id = getTile(this.world, tx, ty);
         if (id === TORCH) {
           const fl = 0.7 + 0.3 * Math.sin(this.frame * 0.3 + tx * 1.7);
-          glow(tx * TILE + TILE / 2, ty * TILE + TILE - 13, TILE * 1.7 * fl, `rgba(255,170,60,${0.4 * fl})`);
+          const r = TILE * 1.6 * fl;
+          ctx.globalAlpha = 0.32 * fl;
+          ctx.drawImage(spr, 0, 0, spr.width, spr.height, tx * TILE + TILE / 2 - r, ty * TILE + TILE - 13 - r, r * 2, r * 2);
         } else if (id === FURNACE) {
-          glow(tx * TILE + TILE / 2, ty * TILE + TILE * 0.7, TILE * 1.2, "rgba(255,120,40,0.28)");
+          const r = TILE * 1.2;
+          ctx.globalAlpha = 0.24;
+          ctx.drawImage(spr, 0, 0, spr.width, spr.height, tx * TILE + TILE / 2 - r, ty * TILE + TILE * 0.7 - r, r * 2, r * 2);
         }
       }
     }
+    ctx.globalAlpha = 1;
     ctx.restore();
     ctx.globalCompositeOperation = "source-over";
   }
@@ -1512,52 +1549,14 @@ export class Engine {
       ctx.fill();
       return;
     }
-    // blit cached pixel-art texture (4 variants for variety)
+    // blit cached pixel-art texture (4 variants for variety). The textures
+    // already bake in edge shading, so no per-tile overlays are needed here.
     const v = (tx * 7 ^ ty * 13) & 3;
     ctx.drawImage(tileTexture(id, v), 0, 0, TEX, TEX, x, y, TILE, TILE);
-
-    // ambient occlusion / edge lighting: soft shadows where faces meet air,
-    // a bright rim on top-lit edges — gives blocks a sculpted, painterly depth.
-    const above = isSolid(getTile(this.world, tx, ty - 1));
-    const below = isSolid(getTile(this.world, tx, ty + 1));
-    const left = isSolid(getTile(this.world, tx - 1, ty));
-    const right = isSolid(getTile(this.world, tx + 1, ty));
-    if (!above) {
-      // soft highlight on the top edge
-      const hg = ctx.createLinearGradient(0, y, 0, y + TILE * 0.5);
-      hg.addColorStop(0, "rgba(255,255,255,0.18)");
-      hg.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = hg;
-      ctx.fillRect(x, y, TILE, TILE * 0.5);
-    }
-    if (above) {
-      // shadow cast down from the block above
-      const sg = ctx.createLinearGradient(0, y, 0, y + TILE * 0.45);
-      sg.addColorStop(0, "rgba(0,0,0,0.26)");
-      sg.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = sg;
-      ctx.fillRect(x, y, TILE, TILE * 0.45);
-    }
-    if (!below) {
-      const sg = ctx.createLinearGradient(0, y + TILE, 0, y + TILE * 0.6);
-      sg.addColorStop(0, "rgba(0,0,0,0.3)");
-      sg.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = sg;
-      ctx.fillRect(x, y + TILE * 0.6, TILE, TILE * 0.4);
-    }
-    if (!left) {
-      const sg = ctx.createLinearGradient(x, 0, x + TILE * 0.4, 0);
-      sg.addColorStop(0, "rgba(0,0,0,0.2)");
-      sg.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = sg;
-      ctx.fillRect(x, y, TILE * 0.4, TILE);
-    }
-    if (!right) {
-      const sg = ctx.createLinearGradient(x + TILE, 0, x + TILE * 0.6, 0);
-      sg.addColorStop(0, "rgba(0,0,0,0.2)");
-      sg.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = sg;
-      ctx.fillRect(x + TILE * 0.6, y, TILE * 0.4, TILE);
+    // single cheap highlight on the top edge of surface-exposed blocks.
+    if (!isSolid(getTile(this.world, tx, ty - 1))) {
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fillRect(x, y, TILE, 2);
     }
   }
 
@@ -1927,6 +1926,13 @@ export class Engine {
   private drawLighting(tx0: number, ty0: number, tx1: number, ty1: number, bright: number) {
     const ctx = this.ctx;
     const night = this.isNightNow();
+    // PERFORMANCE: when it's bright day AND the player is near the surface,
+    // there's essentially no darkness to draw — skip the whole lighting pass.
+    const ptx = Math.floor(this.px / TILE);
+    const surfHere = this.world.surfaceY[ptx];
+    const depth = this.py / TILE - surfHere;
+    if (!night && bright > 0.92 && depth < 4) return;
+
     const gw = tx1 - tx0 + 1;
     const gh = ty1 - ty0 + 1;
     if (gw <= 0 || gh <= 0) return;
@@ -1997,27 +2003,21 @@ export class Engine {
 
     // box blur (separable, radius 2) → smooth, spreading light like Terraria
     const blurX = (src: Float32Array, dst: Float32Array) => {
-      const R = 2;
       for (let j = 0; j < gh; j++) {
         for (let i = 0; i < gw; i++) {
-          let s = 0, n = 0;
-          for (let k = -R; k <= R; k++) {
-            const ii = i + k;
-            if (ii >= 0 && ii < gw) { s += src[j * gw + ii]; n++; }
-          }
+          let s = src[j * gw + i], n = 1;
+          if (i > 0) { s += src[j * gw + i - 1]; n++; }
+          if (i < gw - 1) { s += src[j * gw + i + 1]; n++; }
           dst[j * gw + i] = s / n;
         }
       }
     };
     const blurY = (src: Float32Array, dst: Float32Array) => {
-      const R = 2;
       for (let j = 0; j < gh; j++) {
         for (let i = 0; i < gw; i++) {
-          let s = 0, n = 0;
-          for (let k = -R; k <= R; k++) {
-            const jj = j + k;
-            if (jj >= 0 && jj < gh) { s += src[jj * gw + i]; n++; }
-          }
+          let s = src[j * gw + i], n = 1;
+          if (j > 0) { s += src[(j - 1) * gw + i]; n++; }
+          if (j < gh - 1) { s += src[(j + 1) * gw + i]; n++; }
           dst[j * gw + i] = s / n;
         }
       }
