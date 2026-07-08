@@ -7,6 +7,8 @@ import Landing from "./Landing";
 import MobileGate, { goFullscreen } from "./MobileGate";
 import CheatMenu from "./CheatMenu";
 import EndingSequence from "./EndingSequence";
+import LanguagePicker from "./LanguagePicker";
+import { useT, t, tItem, tItemDesc, tQuest, getLang, setLang, hasChosenLang, LANGS } from "./i18n";
 
 type Screen = "landing" | "title" | "story" | "howto" | "playing";
 
@@ -27,29 +29,15 @@ const ls = {
   },
 };
 
-const STORY = [
-  "The world of Terralite was once whole — earth, ore and sky in perfect balance. Then the Slime King rose from the deep, swallowing the light and shattering the land into endless caves.",
-  "You wake alone on the surface with nothing but your bare hands. To survive you must chop wood, dig into the earth, and forge tools from the ores you uncover.",
-  "Build a shelter before nightfall, for when the sun sets, zombies and bats crawl from the dark. Light torches. Smelt metals. Grow stronger.",
-  "Craft the Slime Crown, summon the King, and reclaim the world. This is your saga — block by block, blade by blade.",
-];
-
-const HOWTO = [
-  { h: "Move & Survive", t: "A / D or ← → to walk. Space / W to jump. You regenerate health when safe." },
-  { h: "Mine", t: "Hold LEFT-CLICK on a block within reach. Bare hands mine wood & dirt; craft pickaxes to dig stone, ores and diamond." },
-  { h: "Build", t: "RIGHT-CLICK places the selected block. Build walls, towers and a home lit by torches." },
-  { h: "Craft", t: "Press E to open the crafting menu. A Workbench unlocks tools; a Furnace smelts ore into bars." },
-  { h: "Fight", t: "Craft a sword and LEFT-CLICK enemies. Slimes drop gel, zombies lurk at night, bats haunt the caves." },
-  { h: "Progress", t: "Follow the Quest log (top-right). Mine deeper for better ore, craft the Crown, and slay the Slime King to win!" },
-];
-
-const STATION_LABEL: Record<Station, string> = { none: "Hands", workbench: "Workbench", furnace: "Furnace" };
+function stationLabel(s: Station): string {
+  return s === "none" ? t("st_none") : s === "workbench" ? t("st_workbench") : t("st_furnace");
+}
 
 function itemIcon(id: string) {
   return ITEMS[id]?.icon ?? "❓";
 }
 function itemName(id: string) {
-  return ITEMS[id]?.name ?? id;
+  return tItem(id);
 }
 /** Tint behind tool icons so each material is visually distinct. */
 function itemTint(id: string): string | undefined {
@@ -162,13 +150,13 @@ function Clock({ dayFrac, isNight, dayCount }: { dayFrac: number; isNight: boole
   const total = dayFrac * 24;
   const h = Math.floor(total);
   const m = Math.floor((total - h) * 60);
-  const t = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+  const time = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
   return (
     <div className="flex items-center gap-1 rounded-lg border border-white/15 bg-black/50 px-2 py-0.5 text-xs sm:gap-1.5 sm:px-3 sm:py-1 sm:text-sm">
       <span>{isNight ? "🌙" : "☀️"}</span>
-      <span className="tabular-nums text-white/90">{t}</span>
+      <span className="tabular-nums text-white/90">{time}</span>
       <span className="text-white/40">·</span>
-      <span className="text-white/60">D{dayCount}</span>
+      <span className="text-white/60">{t("day")} {dayCount}</span>
     </div>
   );
 }
@@ -203,23 +191,23 @@ function Hud({
       <div className="absolute right-2 top-2 flex flex-col items-end gap-1.5 sm:right-3 sm:top-3 sm:gap-2">
         <div className="flex gap-1.5 sm:gap-2">
           <button onClick={onToggleInv} className="pointer-events-auto rounded-lg border border-white/15 bg-black/50 px-2.5 py-1.5 text-sm text-white/85 hover:bg-white/10 sm:px-3">
-            🎒<span className="ml-1 hidden sm:inline">Inventory</span>
+            🎒<span className="ml-1 hidden sm:inline">{t("inventory")}</span>
           </button>
           <button onClick={onPause} className="pointer-events-auto rounded-lg border border-white/15 bg-black/50 px-2.5 py-1.5 text-sm text-white/85 hover:bg-white/10 sm:px-3">
             ❚❚
           </button>
         </div>
         <div className="pointer-events-none w-40 rounded-lg border border-emerald-300/20 bg-black/55 p-1.5 backdrop-blur-sm sm:w-56 sm:rounded-xl sm:p-2.5">
-          <div className="text-[9px] uppercase tracking-[0.15em] text-emerald-300/80 sm:text-[10px] sm:tracking-[0.2em]">{s.questDone ? "All Complete" : "Quest"}</div>
-          <div className="truncate text-xs font-semibold text-white/90 sm:text-sm">{s.questTitle}</div>
-          <div className="truncate text-[11px] text-white/60 sm:text-xs">{s.questText}</div>
+          <div className="text-[9px] uppercase tracking-[0.15em] text-emerald-300/80 sm:text-[10px] sm:tracking-[0.2em]">{s.questDone ? t("all_complete") : t("quest")}</div>
+          <div className="truncate text-xs font-semibold text-white/90 sm:text-sm">{tQuest(s.questIndex).title}</div>
+          <div className="truncate text-[11px] text-white/60 sm:text-xs">{tQuest(s.questIndex).text}</div>
         </div>
       </div>
 
       {/* boss bar */}
       {s.boss && (
         <div className="absolute bottom-44 left-1/2 w-[80%] max-w-xl -translate-x-1/2 sm:bottom-24">
-          <div className="mb-1 text-center text-xs font-semibold text-emerald-200 sm:text-sm">{s.boss.name}</div>
+          <div className="mb-1 text-center text-xs font-semibold text-emerald-200 sm:text-sm">{t("slime_king")}</div>
           <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/70 ring-1 ring-emerald-400/30 sm:h-3">
             <div className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-lime-400 transition-[width] duration-150" style={{ width: `${(s.boss.hp / s.boss.maxHp) * 100}%` }} />
           </div>
@@ -406,10 +394,10 @@ function InventoryPanel({
     <div className="anim-fade absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
       <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0c0f1a]/95 shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
-          <h2 className="text-lg font-bold text-amber-100">Inventory & Crafting</h2>
-          <div className="flex items-center gap-3 text-xs text-white/60">
-            <span className={s.stations.workbench ? "text-emerald-300" : "text-white/30"}>🛠️ Workbench {s.stations.workbench ? "✓" : "✗"}</span>
-            <span className={s.stations.furnace ? "text-emerald-300" : "text-white/30"}>🏭 Furnace {s.stations.furnace ? "✓" : "✗"}</span>
+            <h2 className="text-lg font-bold text-amber-100">{t("inv_craft")}</h2>
+            <div className="flex items-center gap-3 text-xs text-white/60">
+              <span className={s.stations.workbench ? "text-emerald-300" : "text-white/30"}>🛠️ {t("workbench")} {s.stations.workbench ? "✓" : "✗"}</span>
+              <span className={s.stations.furnace ? "text-emerald-300" : "text-white/30"}>🏭 {t("furnace")} {s.stations.furnace ? "✓" : "✗"}</span>
             <button onClick={onClose} className="rounded-md bg-white/10 px-3 py-1 text-white hover:bg-white/20">
               Close ✕
             </button>
@@ -420,8 +408,8 @@ function InventoryPanel({
           {/* inventory grid */}
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-white/40">
-              <span>Items</span>
-              <span className="normal-case tracking-normal text-white/25">· тапни слот, затем тапни другой — предмет переместится</span>
+              <span>{t("items")}</span>
+              <span className="normal-case tracking-normal text-white/25">· {t("items_hint")}</span>
             </div>
             <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8">
               {s.inventory.map((slot, i) => {
@@ -474,16 +462,16 @@ function InventoryPanel({
                   <div className="text-sm font-semibold text-white">
                     {itemIcon(sel.id)} {itemName(sel.id)} <span className="text-white/40">×{sel.count}</span>
                   </div>
-                  {ITEMS[sel.id]?.desc && <div className="text-xs text-white/50">{ITEMS[sel.id].desc}</div>}
+                  {tItemDesc(sel.id) && <div className="text-xs text-white/50">{tItemDesc(sel.id)}</div>}
                   <div className="mt-2 flex gap-2">
                     {sel.id === "apple" && (
                       <Btn variant="gold" className="px-4 py-1.5 text-xs" onClick={() => onConsume("apple")}>
-                        🍎 Eat (+25 HP)
+                        🍎 {t("eat_hp")}
                       </Btn>
                     )}
                     {sel.id === "crown" && (
                       <Btn variant="primary" className="px-4 py-1.5 text-xs" onClick={onSummon}>
-                        👑 Summon King {s.isNight ? "(night ✓)" : "(needs night)"}
+                        👑 {t("summon_king")} {s.isNight ? t("night_ok") : t("needs_night")}
                       </Btn>
                     )}
                   </div>
@@ -506,10 +494,10 @@ function InventoryPanel({
                     <span className="text-xl">{out.icon}</span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-xs font-semibold text-white/90">
-                        {out.name} <span className="text-white/40">×{r.outCount}</span>
+                        {tItem(r.out)} <span className="text-white/40">×{r.outCount}</span>
                       </div>
                       <div className="flex flex-wrap gap-x-2 text-[10px] text-white/50">
-                        <span className={s.stations[r.station as "workbench" | "furnace"] || r.station === "none" ? "text-emerald-300/70" : "text-rose-300/60"}>{STATION_LABEL[r.station]}</span>
+                        <span className={s.stations[r.station as "workbench" | "furnace"] || r.station === "none" ? "text-emerald-300/70" : "text-rose-300/60"}>{stationLabel(r.station)}</span>
                         {r.ing.map((ing) => (
                           <span key={ing.id}>
                             {itemIcon(ing.id)} {ing.n}
@@ -522,7 +510,7 @@ function InventoryPanel({
                       onClick={() => onCraft(r.id)}
                       className={`rounded-md px-3 py-1 text-xs font-semibold ${can ? "bg-emerald-400 text-emerald-950 hover:bg-emerald-300" : "bg-white/5 text-white/30"}`}
                     >
-                      Craft
+                      {t("craft")}
                     </button>
                   </div>
                 );
@@ -563,31 +551,31 @@ function TitleScreen({
         <span key={i} className="anim-float absolute rounded-full bg-amber-200" style={{ left: `${m.left}%`, top: `${m.top}%`, width: m.size, height: m.size, opacity: m.op, animationDelay: `${m.delay}s`, animationDuration: `${m.dur}s`, boxShadow: "0 0 8px #ffd277" }} />
       ))}
       <div className="relative z-10 flex h-full flex-col items-center justify-center px-6 text-center">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-amber-300/30 bg-black/40 px-4 py-1 text-[10px] uppercase tracking-[0.4em] text-amber-200/90 sm:text-xs">⛏ A Sandbox Survival Saga</div>
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-amber-300/30 bg-black/40 px-4 py-1 text-[10px] uppercase tracking-[0.4em] text-amber-200/90 sm:text-xs">⛏ {t("tagline")}</div>
         <h1 className="title-gradient text-6xl font-black leading-none drop-shadow-2xl sm:text-8xl md:text-9xl">TERRALITE</h1>
         <p className="mt-2 text-base tracking-[0.4em] text-emerald-100/90 drop-shadow sm:text-xl">REALMS UNBOUND</p>
-        <p className="mt-5 max-w-md text-sm text-white/70 sm:text-base">Dig, build, craft and fight through a procedurally generated world. Mine the deep, forge your legend, and slay the Slime King.</p>
+        <p className="mt-5 max-w-md text-sm text-white/70 sm:text-base">{t("hero_p")}</p>
         <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
           <Btn variant="primary" className="px-12 py-4 text-lg" onClick={onPlay}>
-            ▶ Play
+            ▶ {t("play")}
           </Btn>
           <Btn variant="ghost" onClick={onHowTo}>
-            How to Play
+            {t("how_to_play")}
           </Btn>
         </div>
         <div className="mt-6 flex gap-2">
           <button onClick={toggleMusic} className="flex items-center gap-2 rounded-lg border border-white/15 bg-black/30 px-3 py-1.5 text-xs uppercase tracking-wider text-white/80 hover:bg-white/10">
-            {musicOn ? "🔊" : "🔇"} Music
+            {musicOn ? "🔊" : "🔇"} {t("music")}
           </button>
           <button onClick={toggleSfx} className="flex items-center gap-2 rounded-lg border border-white/15 bg-black/30 px-3 py-1.5 text-xs uppercase tracking-wider text-white/80 hover:bg-white/10">
-            {sfxOn ? "🔊" : "🔇"} Sound
+            {sfxOn ? "🔊" : "🔇"} {t("sound")}
           </button>
         </div>
         <div className="absolute bottom-4 flex flex-col items-center gap-1 text-[11px] text-white/40">
           <div>
-            Deepest Run · Day <span className="text-amber-200/80">{bestDay}</span>
+            {t("deepest_run")} · {t("day")} <span className="text-amber-200/80">{bestDay}</span>
           </div>
-          <div>Free to play · a love letter to sandbox adventures</div>
+          <div>{t("free_play")}</div>
         </div>
       </div>
     </div>
@@ -596,37 +584,38 @@ function TitleScreen({
 
 function StoryScreen({ onBegin, onBack }: { onBegin: () => void; onBack: () => void }) {
   const [page, setPage] = useState(0);
-  const last = page === STORY.length - 1;
+  const PAGES = 4;
+  const last = page === PAGES - 1;
   return (
     <div className="anim-fade relative flex h-full w-full items-center justify-center bg-[#070a12] px-6">
       <div className="pointer-events-none absolute inset-0 opacity-30" style={{ background: "radial-gradient(circle at 50% 30%, rgba(80,160,90,0.4), transparent 60%)" }} />
       <div className="relative z-10 max-w-2xl text-center">
-        <div className="mb-8 text-xs uppercase tracking-[0.5em] text-emerald-300/70">Prologue</div>
+        <div className="mb-8 text-xs uppercase tracking-[0.5em] text-emerald-300/70">{t("story_begin")}</div>
         <p key={page} className="anim-rise text-xl leading-relaxed text-white/90 sm:text-2xl" style={{ minHeight: "8em" }}>
-          {STORY[page]}
+          {t(`s${page + 1}`)}
         </p>
         <div className="mt-10 flex items-center justify-center gap-2">
-          {STORY.map((_, i) => (
+          {Array.from({ length: PAGES }).map((_, i) => (
             <span key={i} className={`h-1.5 rounded-full transition-all ${i === page ? "w-8 bg-amber-300" : "w-3 bg-white/20"}`} />
           ))}
         </div>
         <div className="mt-8 flex items-center justify-center gap-3">
           {page > 0 ? (
             <Btn variant="ghost" onClick={() => setPage((p) => p - 1)}>
-              Back
+              ←
             </Btn>
           ) : (
             <Btn variant="ghost" onClick={onBack}>
-              Menu
+              {t("main_menu")}
             </Btn>
           )}
           {last ? (
             <Btn variant="primary" onClick={onBegin}>
-              Enter the World ▶
+              {t("begin_journey")} ▶
             </Btn>
           ) : (
             <Btn variant="gold" onClick={() => setPage((p) => p + 1)}>
-              Continue
+              {t("continue")} →
             </Btn>
           )}
         </div>
@@ -636,25 +625,30 @@ function StoryScreen({ onBegin, onBack }: { onBegin: () => void; onBack: () => v
 }
 
 function HowToScreen({ onBack }: { onBack: () => void }) {
+  const HOWTO = [
+    { h: t("h1t"), d: t("h1d") },
+    { h: t("h2t"), d: t("h2d") },
+    { h: t("h3t"), d: t("h3d") },
+    { h: t("h4t"), d: t("h4d") },
+    { h: t("h5t"), d: t("h5d") },
+    { h: t("h6t"), d: t("h6d") },
+  ];
   return (
     <div className="anim-fade h-full w-full overflow-y-auto bg-[#070a12] px-6 py-10">
       <div className="mx-auto max-w-2xl">
-        <h2 className="text-3xl font-bold text-amber-100 sm:text-4xl">How to Play</h2>
-        <p className="mt-2 text-sm text-white/55">A quick guide to surviving Terralite.</p>
+        <h2 className="text-3xl font-bold text-amber-100 sm:text-4xl">{t("how_title")}</h2>
+        <p className="mt-2 text-sm text-white/55">{t("how_sub")}</p>
         <div className="mt-8 grid gap-4 sm:grid-cols-2">
           {HOWTO.map((c) => (
             <div key={c.h} className="rounded-2xl border border-emerald-300/20 bg-white/5 p-5">
               <div className="mb-1.5 text-lg font-semibold text-emerald-100">{c.h}</div>
-              <div className="text-sm text-white/65">{c.t}</div>
+              <div className="text-sm text-white/65">{c.d}</div>
             </div>
           ))}
         </div>
-        <div className="mt-6 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-100/80">
-          ⌨️ Controls: <b>WASD/Arrows</b> move · <b>Space</b> jump · <b>Left-Click</b> mine/attack · <b>Right-Click</b> place · <b>1–0</b> or scroll select · <b>E</b> inventory · <b>Esc</b> pause
-        </div>
         <div className="mt-6 text-center">
           <Btn variant="ghost" onClick={onBack}>
-            ← Back
+            ← {t("main_menu")}
           </Btn>
         </div>
       </div>
@@ -664,6 +658,8 @@ function HowToScreen({ onBack }: { onBack: () => void }) {
 
 // ---------------- App ----------------
 export default function App() {
+  useT(); // re-render on language change
+  const [needLang, setNeedLang] = useState<boolean>(() => !hasChosenLang());
   const [screen, setScreen] = useState<Screen>("landing");
   const [runId, setRunId] = useState(0);
   const [startMode, setStartMode] = useState<"new" | "auto">("auto");
@@ -816,6 +812,11 @@ export default function App() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#070a12] text-white">
+      {needLang && (
+        <LanguagePicker
+          onDone={() => setNeedLang(false)}
+        />
+      )}
       <MobileGate onPlay={beginGame} />
       {playing && (
         <div className="absolute inset-0">
@@ -840,28 +841,40 @@ export default function App() {
           {pauseOpen && !ended && (
             <div className="anim-fade absolute inset-0 z-20 flex items-center justify-center bg-black/70 backdrop-blur-md">
               <div className="w-full max-w-sm text-center">
-                <div className="text-4xl font-bold text-white/90">Paused</div>
+                <div className="text-4xl font-bold text-white/90">{t("paused")}</div>
                 <div className="mt-6 flex flex-col items-center gap-3">
                   <Btn variant="primary" onClick={() => setPauseOpen(false)}>
-                    Resume
+                    {t("resume")}
                   </Btn>
                   <Btn variant="ghost" onClick={retry}>
-                    Restart World
+                    {t("restart_world")}
                   </Btn>
                   <Btn variant="danger" onClick={toMenu}>
-                    Quit to Menu
+                    {t("quit_menu")}
                   </Btn>
                 </div>
                 <div className="mt-5 flex flex-wrap justify-center gap-2">
                   <button onClick={goFullscreen} className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-400/20">
-                    📺 Полный экран
+                    📺 {t("fullscreen")}
                   </button>
                   <button onClick={() => setMusicOn((v) => !v)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10">
-                    {musicOn ? "🔊" : "🔇"} Music
+                    {musicOn ? "🔊" : "🔇"} {t("music")}
                   </button>
                   <button onClick={() => setSfxOn((v) => !v)} className="rounded-lg border border-white/15 bg-black/40 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10">
-                    {sfxOn ? "🔊" : "🔇"} Sound
+                    {sfxOn ? "🔊" : "🔇"} {t("sound")}
                   </button>
+                </div>
+                {/* language switcher */}
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+                  {LANGS.map((l) => (
+                    <button
+                      key={l.code}
+                      onClick={() => setLang(l.code)}
+                      className={`rounded-lg border px-2.5 py-1 text-xs ${getLang() === l.code ? "border-amber-300 bg-amber-400/20 text-amber-100" : "border-white/15 bg-black/40 text-white/70 hover:bg-white/10"}`}
+                    >
+                      {l.flag} {l.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -873,24 +886,24 @@ export default function App() {
             <div className="anim-fade absolute inset-0 z-30 flex items-center justify-center px-6">
               <div className="absolute inset-0" style={{ background: "radial-gradient(circle at 50% 40%, rgba(150,40,60,0.28), rgba(7,10,18,0.96))" }} />
               <div className="relative z-10 w-full max-w-md text-center">
-                <div className="text-5xl font-black sm:text-7xl text-rose-300">YOU DIED</div>
-                <p className="mt-3 text-sm text-white/70 sm:text-base">The dark claimed you. But a new world awaits another survivor...</p>
+                <div className="text-5xl font-black sm:text-7xl text-rose-300">{t("you_died")}</div>
+                <p className="mt-3 text-sm text-white/70 sm:text-base">{t("died_text")}</p>
                 <div className="mx-auto mt-7 grid max-w-xs grid-cols-2 gap-3 text-left">
                   <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                    <div className="text-[10px] uppercase tracking-widest text-white/45">Day Reached</div>
+                    <div className="text-[10px] uppercase tracking-widest text-white/45">{t("day_reached")}</div>
                     <div className="text-xl font-bold text-amber-100">{state.dayCount}</div>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                    <div className="text-[10px] uppercase tracking-widest text-white/45">Quests</div>
+                    <div className="text-[10px] uppercase tracking-widest text-white/45">{t("quests")}</div>
                     <div className="text-xl font-bold text-amber-100">{state.questDone ? "ALL" : "—"}</div>
                   </div>
                 </div>
                 <div className="mt-8 flex justify-center gap-3">
                   <Btn variant="primary" onClick={retry}>
-                    New World
+                    {t("new_world")}
                   </Btn>
                   <Btn variant="ghost" onClick={toMenu}>
-                    Main Menu
+                    {t("main_menu")}
                   </Btn>
                 </div>
               </div>

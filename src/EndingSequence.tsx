@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { audio } from "./audio";
 import sandboxBg from "./assets/sandbox-bg.jpg";
+import { t } from "./i18n";
 
 const sparks = Array.from({ length: 26 }, () => ({
   left: Math.random() * 100,
@@ -60,66 +61,51 @@ export default function EndingSequence({
         {stage === "scene1" && (
           <div key="s1" className="end-in">
             <div className="mb-5 text-6xl">👑</div>
-            <h1 className="end-title title-gradient font-display text-4xl font-black sm:text-6xl">ПОБЕДА</h1>
-            <p className="mt-6 text-lg leading-relaxed text-amber-50/80 sm:text-2xl">
-              Слизневый Король повержен.
-            </p>
-            <p className="mt-3 text-base text-white/60 sm:text-lg">
-              Его корона рассыпается золотой пылью, и над землёй Терралайт наконец занимается рассвет.
-            </p>
+            <h1 className="end-title title-gradient font-display text-4xl font-black sm:text-6xl">{t("end_victory")}</h1>
+            <p className="mt-6 text-lg leading-relaxed text-amber-50/80 sm:text-2xl">{t("end_king")}</p>
+            <p className="mt-3 text-base text-white/60 sm:text-lg">{t("end_dust")}</p>
           </div>
         )}
 
         {stage === "scene2" && (
           <div key="s2" className="end-in">
             <div className="mb-5 text-5xl">🌅</div>
-            <p className="text-xl leading-relaxed text-amber-50/90 sm:text-3xl">
-              Свет возвращается в мир. Деревья тянутся к солнцу, пещеры наполняются теплом, а твари ночи отступают навсегда.
-            </p>
-            <p className="mt-6 text-lg font-semibold text-emerald-200/90 sm:text-2xl">
-              Ты — последний Хранитель, и ты исполнил свой долг.
-            </p>
+            <p className="text-xl leading-relaxed text-amber-50/90 sm:text-3xl">{t("end_light")}</p>
+            <p className="mt-6 text-lg font-semibold text-emerald-200/90 sm:text-2xl">{t("end_warden")}</p>
           </div>
         )}
 
         {stage === "scene3" && (
           <div key="s3" className="end-in">
-            <p className="text-2xl tracking-[0.3em] text-amber-100/90 sm:text-4xl">ПРОДОЛЖЕНИЕ</p>
-            <p className="text-2xl tracking-[0.3em] text-amber-100/90 sm:text-4xl">СЛЕДУЕТ...</p>
-            <p className="mt-8 text-sm uppercase tracking-[0.4em] text-white/40">Глава II уже близко</p>
+            <p className="text-2xl tracking-[0.3em] text-amber-100/90 sm:text-4xl">{t("end_tbc")}</p>
+            <p className="mt-8 text-sm uppercase tracking-[0.4em] text-white/40">{t("end_chapter2")}</p>
           </div>
         )}
 
         {stage === "credits" && (
           <div key="s4" className="end-in">
             <div className="mb-4 text-5xl">⛏️</div>
-            <p className="mb-2 text-xs uppercase tracking-[0.5em] text-white/40">TERRALITE: Realms Unbound</p>
-            <h1 className="end-title title-gradient font-display text-3xl font-black sm:text-5xl">
-              Made by
-            </h1>
-            <h2 className="end-title title-gradient font-display mt-2 text-4xl font-black sm:text-6xl">
-              Maximgrg Dev Team
-            </h2>
+            <p className="mb-2 text-xs uppercase tracking-[0.5em] text-white/40">{t("terralite_subtitle")}</p>
+            <h1 className="end-title title-gradient font-display text-3xl font-black sm:text-5xl">{t("made_by")}</h1>
+            <h2 className="end-title title-gradient font-display mt-2 text-4xl font-black sm:text-6xl">Maximgrg Dev Team</h2>
             <div className="mx-auto mt-8 h-px w-24 bg-gradient-to-r from-transparent via-amber-300/60 to-transparent" />
-            <p className="mt-4 text-sm text-white/50">
-              Спасибо, что прошёл эту сагу. <br /> Твой мир ждёт — строй, исследуй и твори дальше.
-            </p>
+            <p className="mt-4 text-sm text-white/50">{t("thanks")}</p>
 
             <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <button
                 onClick={onContinueWorld}
                 className="rounded-xl bg-gradient-to-r from-amber-300 via-orange-400 to-amber-500 px-7 py-3.5 text-base font-bold text-[#1a1205] shadow-[0_0_30px_rgba(255,170,70,0.5)] transition-transform hover:scale-105"
               >
-                ▶ Продолжить в своём мире
+                ▶ {t("continue_world")}
               </button>
               <button
                 onClick={onNewWorld}
                 className="rounded-xl border border-white/25 bg-white/5 px-7 py-3.5 text-base font-semibold text-white/90 backdrop-blur transition-colors hover:bg-white/15"
               >
-                🌍 Новый мир
+                🌍 {t("new_world")}
               </button>
               <button onClick={onMenu} className="text-sm text-white/45 transition-colors hover:text-white/70">
-                В меню
+                {t("main_menu")}
               </button>
             </div>
           </div>
@@ -132,7 +118,7 @@ export default function EndingSequence({
           onClick={skip}
           className="absolute bottom-6 right-6 rounded-lg border border-white/15 bg-black/40 px-4 py-2 text-xs text-white/50 backdrop-blur transition-colors hover:bg-white/10 hover:text-white/80"
         >
-          Пропустить ▸
+          {t("skip")} ▸
         </button>
       )}
     </div>

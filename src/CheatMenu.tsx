@@ -1,4 +1,6 @@
 import { Engine } from "./engine";
+import { ITEMS } from "./world";
+import { t, tItem } from "./i18n";
 
 const GIVE_ITEMS: { id: string; n: number; label: string }[] = [
   { id: "wood", n: 50, label: "🪵 Дерево ×50" },
@@ -41,38 +43,36 @@ export default function CheatMenu({ engineRef, onClose }: { engineRef: React.Mut
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
           <div className="flex items-center gap-2">
             <span className="text-xl">🛸</span>
-            <h2 className="text-lg font-black text-amber-200">GOD MENU</h2>
-            <span className="rounded bg-amber-400/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-amber-200/80">cheat</span>
+            <h2 className="text-lg font-black text-amber-200">{t("god_menu")}</h2>
+            <span className="rounded bg-amber-400/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-amber-200/80">{t("cheat")}</span>
           </div>
           <button onClick={onClose} className="rounded-md bg-white/10 px-3 py-1 text-white hover:bg-white/20">
             ✕
           </button>
         </div>
         <div className="max-h-[70vh] overflow-y-auto p-5">
-          <div className="mb-2 text-xs uppercase tracking-widest text-white/40">Способности</div>
+          <div className="mb-2 text-xs uppercase tracking-widest text-white/40">⚙️</div>
           <div className="mb-4 grid grid-cols-2 gap-2">
             <Row onClick={() => engineRef.current?.toggleFly()} active={fly}>
-              ✈️ Полёт {fly ? "ВКЛ" : "выкл"}
+              ✈️ {t("ab_fly")} {fly ? t("on") : t("off")}
             </Row>
             <Row onClick={() => engineRef.current?.toggleGod()} active={god}>
-              🛡️ Бессмертие {god ? "ВКЛ" : "выкл"}
+              🛡️ {t("ab_god")} {god ? t("on") : t("off")}
             </Row>
-            <Row onClick={() => engineRef.current?.healFull()}>❤️ Полное HP</Row>
-            <Row onClick={() => engineRef.current?.setDay()}>☀️ Сделать день</Row>
-            <Row onClick={() => engineRef.current?.setNight()}>🌙 Сделать ночь</Row>
-            <Row onClick={() => engineRef.current?.nextOreTier()}>📦 Всё лучшее сразу</Row>
+            <Row onClick={() => engineRef.current?.healFull()}>❤️ {t("ab_heal")}</Row>
+            <Row onClick={() => engineRef.current?.setDay()}>☀️ {t("ab_day")}</Row>
+            <Row onClick={() => engineRef.current?.setNight()}>🌙 {t("ab_night")}</Row>
+            <Row onClick={() => engineRef.current?.nextOreTier()}>📦 {t("ab_all")}</Row>
           </div>
-          <div className="mb-2 text-xs uppercase tracking-widest text-white/40">Выдать предметы</div>
+          <div className="mb-2 text-xs uppercase tracking-widest text-white/40">{t("give_items")}</div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {GIVE_ITEMS.map((g) => (
               <Row key={g.id} onClick={() => engineRef.current?.giveItem(g.id, g.n)}>
-                {g.label}
+                {ITEMS[g.id]?.icon ?? "❓"} {tItem(g.id)} ×{g.n}
               </Row>
             ))}
           </div>
-          <p className="mt-4 text-[10px] text-white/30">
-            Полёт: W/Пробел — вверх, S — вниз. Это секретное меню — для теста и веселья. Прогресс сохраняется.
-          </p>
+          <p className="mt-4 text-[10px] text-white/30">{t("fly_hint")}</p>
         </div>
       </div>
     </div>

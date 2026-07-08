@@ -50,6 +50,7 @@ export interface EngineState {
   questTitle: string;
   questText: string;
   questDone: boolean;
+  questIndex: number;
   banner: { title: string; sub: string; key: number } | null;
   boss: { name: string; hp: number; maxHp: number } | null;
   mineProgress: number;
@@ -1075,8 +1076,9 @@ export class Engine {
         e.vy = Math.max(-260, Math.min(260, e.vy));
         e.vx += Math.sign(dx) * 60 * dt;
         e.vx = Math.max(-150, Math.min(150, e.vx));
-        e.x += e.vx * dt;
-        e.y += e.vy * dt + Math.sin(e.t * 8) * 1.2;
+        // collide with solid tiles (so bats can't fly through your walls)
+        this.flyCollide(e, dt);
+        e.y += Math.sin(e.t * 8) * 1.2;
       } else {
         // ground physics + hop
         e.vy += GRAVITY * dt;
@@ -1141,6 +1143,37 @@ export class Engine {
       const at = Math.floor((e.y + e.h / 2 + 2) / TILE);
       if (isSolid(getTile(this.world, ahead, at))) e.vy = -300;
     }
+  }
+
+  /** Axis-separated collision for flying enemies (bats). They cannot pass
+      through solid tiles — including blocks the player placed. */
+  private flyCollide(e: Enemy, dt: number) {
+    const halfW = e.w / 2;
+    const halfH = e.h / 2;
+    // X axis
+    const nx = e.x + e.vx * dt;
+    const top = Math.floor((e.y - halfH) / TILE);
+    const bot = Math.floor((e.y + halfH - 0.01) / TILE);
+    if (e.vx > 0) {
+      const rx = Math.floor((nx + halfW) / TILE);
+      for (let ty = top; ty <= bot; ty++) if (isSolid(getTile(this.world, rx, ty))) { e.vx = 0; break; }
+    } else if (e.vx < 0) {
+      const lx = Math.floor((nx - halfW) / TILE);
+      for (let ty = top; ty <= bot; ty++) if (isSolid(getTile(this.world, lx, ty))) { e.vx = 0; break; }
+    }
+    e.x += e.vx * dt;
+    // Y axis
+    const ny = e.y + e.vy * dt;
+    const left = Math.floor((e.x - halfW) / TILE);
+    const right = Math.floor((e.x + halfW - 0.01) / TILE);
+    if (e.vy > 0) {
+      const by = Math.floor((ny + halfH) / TILE);
+      for (let tx = left; tx <= right; tx++) if (isSolid(getTile(this.world, tx, by))) { e.vy = 0; break; }
+    } else if (e.vy < 0) {
+      const ty2 = Math.floor((ny - halfH) / TILE);
+      for (let tx = left; tx <= right; tx++) if (isSolid(getTile(this.world, tx, ty2))) { e.vy = 0; break; }
+    }
+    e.y += e.vy * dt;
   }
 
   private hurt(dmg: number) {
@@ -1282,6 +1315,7 @@ export class Engine {
       questTitle: q ? q.title : "Champion of Aethoria",
       questText: q ? q.text : "All quests complete.",
       questDone: this.questIndex >= QUESTS.length,
+      questIndex: this.questIndex,
       banner: this.banner,
       boss: boss ? { name: "Slime King", hp: Math.max(0, boss.hp), maxHp: boss.maxHp } : null,
       mineProgress: this.mineTX >= 0 ? Math.min(1, this.mineProg / (TILES[getTile(this.world, this.mineTX, this.mineTY)]?.hp || 1)) : 0,
