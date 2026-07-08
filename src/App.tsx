@@ -6,6 +6,7 @@ import bg from "./assets/sandbox-bg.jpg";
 import Landing from "./Landing";
 import MobileGate, { goFullscreen } from "./MobileGate";
 import CheatMenu from "./CheatMenu";
+import EndingSequence from "./EndingSequence";
 
 type Screen = "landing" | "title" | "story" | "howto" | "playing";
 
@@ -745,6 +746,12 @@ export default function App() {
     setRunId((r) => r + 1);
     setScreen("playing");
   };
+  const continueInWorld = () => {
+    click();
+    engineRef.current?.resumeAfterVictory();
+    setEnded(null);
+    setScreen("playing");
+  };
   const toMenu = () => {
     click();
     audio.setTrack("menu");
@@ -859,14 +866,15 @@ export default function App() {
               </div>
             </div>
           )}
-          {ended && state && (
+          {ended === "win" && state && (
+            <EndingSequence onContinueWorld={continueInWorld} onNewWorld={retry} onMenu={toMenu} />
+          )}
+          {ended === "over" && state && (
             <div className="anim-fade absolute inset-0 z-30 flex items-center justify-center px-6">
-              <div className="absolute inset-0" style={{ background: ended === "win" ? "radial-gradient(circle at 50% 40%, rgba(120,220,120,0.25), rgba(7,10,18,0.95))" : "radial-gradient(circle at 50% 40%, rgba(150,40,60,0.28), rgba(7,10,18,0.96))" }} />
+              <div className="absolute inset-0" style={{ background: "radial-gradient(circle at 50% 40%, rgba(150,40,60,0.28), rgba(7,10,18,0.96))" }} />
               <div className="relative z-10 w-full max-w-md text-center">
-                <div className={`text-5xl font-black sm:text-7xl ${ended === "win" ? "title-gradient" : "text-rose-300"}`}>{ended === "win" ? "VICTORY" : "YOU DIED"}</div>
-                <p className="mt-3 text-sm text-white/70 sm:text-base">
-                  {ended === "win" ? "The Slime King is vanquished. Light returns to Terralite — your saga is legend." : "The dark claimed you. But a new world awaits another survivor..."}
-                </p>
+                <div className="text-5xl font-black sm:text-7xl text-rose-300">YOU DIED</div>
+                <p className="mt-3 text-sm text-white/70 sm:text-base">The dark claimed you. But a new world awaits another survivor...</p>
                 <div className="mx-auto mt-7 grid max-w-xs grid-cols-2 gap-3 text-left">
                   <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                     <div className="text-[10px] uppercase tracking-widest text-white/45">Day Reached</div>

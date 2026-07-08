@@ -354,6 +354,14 @@ export class Engine {
     }
   }
 
+  /** Resume free-play in the current world after the victory cinematic ends. */
+  resumeAfterVictory() {
+    this.victory = false;
+    this.gameover = false;
+    this.hp = Math.max(this.hp, this.maxHp);
+    this.last = performance.now();
+  }
+
   private resetProgress() {
     this.hp = 100;
     this.maxHp = 100;
@@ -1000,8 +1008,15 @@ export class Engine {
       this.addItem("diamond", 5);
       this.addItem("gel", 30);
       this.showBanner("THE KING FALLS", "Dawn breaks eternal over your realm");
-      this.checkQuest();
+      // Instant victory: automatically advance all quests to completed
+      // so speedrunning via the Cheat Menu correctly triggers the ending sequence.
+      this.questIndex = QUESTS.length;
+      this.victory = true;
+      audio.playSfx("victory");
       audio.setTrack("day");
+      this.cb.onVictory();
+      this.pushState();
+      this.saveGame();
       return;
     }
     // drops

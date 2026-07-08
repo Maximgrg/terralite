@@ -275,6 +275,45 @@ canvas {
   }
 }
 
+/* ---------- ending cinematic ---------- */
+@keyframes endFadeIn {
+  from { opacity: 0; transform: translateY(24px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes endFadeOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-24px) scale(0.98); }
+}
+.end-in { animation: endFadeIn 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.end-out { animation: endFadeOut 1.8s cubic-bezier(0.4, 0, 0.6, 1) both; }
+
+@keyframes riseLight {
+  0% { transform: translateY(0) scale(1); opacity: 0; }
+  10% { opacity: 0.9; }
+  90% { opacity: 0.7; }
+  100% { transform: translateY(-110vh) scale(0.4); opacity: 0; }
+}
+.end-spark {
+  position: absolute;
+  bottom: -10px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(255,230,150,0.95), rgba(255,200,90,0) 70%);
+  animation: riseLight linear infinite;
+  pointer-events: none;
+}
+
+@keyframes titleGlow {
+  0%, 100% { text-shadow: 0 0 18px rgba(255,210,120,0.6), 0 0 48px rgba(255,170,70,0.35); }
+  50% { text-shadow: 0 0 28px rgba(255,230,150,0.9), 0 0 72px rgba(255,180,80,0.6); }
+}
+.end-title { animation: titleGlow 3.5s ease-in-out infinite; }
+
+@keyframes beamPulse {
+  0%, 100% { opacity: 0.18; }
+  50% { opacity: 0.42; }
+}
+.end-beam { animation: beamPulse 4s ease-in-out infinite; }
+
 /* minimal-latency touch buttons */
 .touch-btn {
   -webkit-tap-highlight-color: transparent;
