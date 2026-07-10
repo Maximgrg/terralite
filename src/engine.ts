@@ -580,6 +580,7 @@ export class Engine {
         workbenchCount: this.workbenchCount,
         furnaceCount: this.furnaceCount,
         kingDefeated: this.kingDefeated,
+        victory: this.victory,
         questIndex: this.questIndex,
         stoneMined: this.stoneMined,
         copperMined: this.copperMined,
@@ -587,6 +588,7 @@ export class Engine {
         currentWorldId: this.currentWorldId,
       };
       localStorage.setItem(this.saveKey(), JSON.stringify(data));
+      console.log("Saving world", this.currentWorldId, "questIndex:", this.questIndex, "victory:", this.victory);
     } catch {
       /* storage full / unavailable — ignore */
     }
@@ -629,7 +631,8 @@ export class Engine {
     this.ironMined = d.ironMined ?? 0;
     this.currentWorldId = d.currentWorldId ?? 0;
     this.gameover = false;
-    this.victory = false;
+    this.victory = d.victory ?? false;
+    console.log("Loaded world", this.currentWorldId, "questIndex:", this.questIndex, "victory:", this.victory);
     this.fallDistance = 0;
     this.shakeX = 0;
     this.shakeY = 0;
