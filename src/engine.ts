@@ -229,7 +229,7 @@ export class Engine {
         const sx = this.world.spawnX;
         const surf = this.world.surfaceY[sx];
         for (let dx = -2; dx <= 2; dx++) {
-          for (let dy = 5; dy >= 1; dy--) {
+          for (let dy = 12; dy >= 1; dy--) {
             const t = getTile(this.world, sx + dx, surf - dy);
             if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
           }
@@ -244,7 +244,7 @@ export class Engine {
       const sx = this.world.spawnX;
       const surf = this.world.surfaceY[sx];
       for (let dx = -2; dx <= 2; dx++) {
-        for (let dy = 5; dy >= 1; dy--) {
+        for (let dy = 12; dy >= 1; dy--) {
           const t = getTile(this.world, sx + dx, surf - dy);
           if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
         }
@@ -477,7 +477,7 @@ export class Engine {
         const sx = this.world.spawnX;
         const surf = this.world.surfaceY[sx];
         for (let dx = -2; dx <= 2; dx++) {
-          for (let dy = 5; dy >= 1; dy--) {
+          for (let dy = 12; dy >= 1; dy--) {
             const t = getTile(this.world, sx + dx, surf - dy);
             if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
           }
@@ -492,7 +492,7 @@ export class Engine {
       const sx = this.world.spawnX;
       const surf = this.world.surfaceY[sx];
       for (let dx = -2; dx <= 2; dx++) {
-        for (let dy = 5; dy >= 1; dy--) {
+        for (let dy = 12; dy >= 1; dy--) {
           const t = getTile(this.world, sx + dx, surf - dy);
           if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
         }
@@ -1047,7 +1047,7 @@ export class Engine {
           if (getTile(this.world, x, y) === PORTAL) {
             // clear nearby trees so player doesn't get stuck
             for (let dx = -2; dx <= 2; dx++) {
-              for (let dy = 5; dy >= 1; dy--) {
+              for (let dy = 12; dy >= 1; dy--) {
                 const t = getTile(this.world, x + dx, y - dy);
                 if (t === WOOD || t === LEAVES) setTile(this.world, x + dx, y - dy, AIR);
               }
@@ -1067,7 +1067,7 @@ export class Engine {
         const sx = this.world.spawnX;
         const surf = this.world.surfaceY[sx];
         for (let dx = -2; dx <= 2; dx++) {
-          for (let dy = 5; dy >= 1; dy--) {
+          for (let dy = 12; dy >= 1; dy--) {
             const t = getTile(this.world, sx + dx, surf - dy);
             if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
           }
