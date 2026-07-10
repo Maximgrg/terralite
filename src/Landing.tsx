@@ -208,6 +208,14 @@ export default function Landing({ onPlay, onContinue, onWorlds }: { onPlay: () =
             >
               <span className="inline-flex items-center gap-2">▶ {t("play_free")}</span>
             </button>
+            {onWorlds && (
+              <button
+                onClick={onWorlds}
+                className="rounded-2xl border border-white/20 bg-white/5 px-8 py-4 text-lg font-semibold text-white/90 backdrop-blur transition-all hover:scale-105 hover:bg-white/15 hover:shadow-[0_0_30px_rgba(255,255,255,0.15)]"
+              >
+                🌍 {t("worlds")}
+              </button>
+            )}
             <button
               onClick={() => scrollToId("story")}
               className="rounded-2xl border border-white/25 bg-white/5 px-8 py-4 text-lg font-semibold text-white/90 backdrop-blur transition-colors hover:bg-white/15"
