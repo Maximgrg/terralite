@@ -39,11 +39,149 @@ function scrollToId(id: string) {
 
 const motes = Array.from({ length: 18 }, () => ({ left: Math.random() * 100, delay: Math.random() * 8, dur: 8 + Math.random() * 10, size: 2 + Math.random() * 4 }));
 
-export default function Landing({ onPlay, onContinue, onWorlds }: { onPlay: () => void; onContinue?: () => void; onWorlds?: () => void }) {
+type WorldEntry = { id: number; name: string };
+
+function WorldPicker({
+  onSelect,
+  onBack,
+}: {
+  onSelect: (id: number) => void;
+  onBack: () => void;
+}) {
+  const [worlds, setWorlds] = useState<WorldEntry[]>(() => Engine.getWorldList());
+  const [creating, setCreating] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const refresh = () => setWorlds(Engine.getWorldList());
+
+  useEffect(() => {
+    if (creating && inputRef.current) inputRef.current.focus();
+  }, [creating]);
+
+  const createWorld = () => {
+    const name = nameInput.trim() || `World ${worlds.length + 1}`;
+    const id = Engine.createNewWorld(name);
+    setNameInput("");
+    setCreating(false);
+    refresh();
+    onSelect(id);
+  };
+
+  const deleteWorld = (id: number) => {
+    Engine.deleteWorld(id);
+    refresh();
+  };
+
+  const worldInfo = (id: number) => {
+    try {
+      const raw = localStorage.getItem(`terralite_save_v1_${id}`);
+      if (!raw) return { day: 0, hasData: false };
+      const d = JSON.parse(raw);
+      return { day: d.dayCount ?? 0, hasData: true };
+    } catch {
+      return { day: 0, hasData: false };
+    }
+  };
+
+  return (
+    <div className="w-full max-w-2xl mx-auto">
+      {/* header row */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-bold text-amber-100 tracking-wide">🌍 {t("worlds")}</h3>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setCreating(true)}
+            className="rounded-lg bg-gradient-to-r from-emerald-500 to-green-600 px-3 py-1.5 text-xs font-bold text-white shadow hover:scale-105 transition-transform"
+          >
+            + {t("new_world_btn")}
+          </button>
+          <button
+            onClick={onBack}
+            className="rounded-lg border border-white/15 bg-black/40 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10 transition-colors"
+          >
+            ✕ {t("main_menu")}
+          </button>
+        </div>
+      </div>
+
+      {/* create dialog */}
+      {creating && (
+        <div className="mb-3 rounded-xl border border-emerald-400/30 bg-emerald-900/30 p-4 backdrop-blur">
+          <div className="text-xs text-emerald-200/80 mb-2">{t("name_your_world")}</div>
+          <div className="flex gap-2">
+            <input
+              ref={inputRef}
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") createWorld(); if (e.key === "Escape") { setCreating(false); setNameInput(""); } }}
+              placeholder={t("world_name_placeholder")}
+              className="flex-1 rounded-lg border border-white/15 bg-black/50 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400/60 placeholder:text-white/30"
+            />
+            <button
+              onClick={createWorld}
+              className="rounded-lg bg-gradient-to-r from-amber-300 to-orange-400 px-4 py-2 text-sm font-bold text-[#1a1205] hover:scale-105 transition-transform"
+            >
+              ▶ {t("play")}
+            </button>
+            <button
+              onClick={() => { setCreating(false); setNameInput(""); }}
+              className="rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white/60 hover:bg-white/10 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* world list */}
+      {worlds.length === 0 && !creating ? (
+        <div className="text-center py-6 text-white/40 text-sm">
+          {t("no_worlds")}
+        </div>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {worlds.map((w) => {
+            const info = worldInfo(w.id);
+            return (
+              <div
+                key={w.id}
+                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 hover:border-amber-300/30 hover:bg-white/[0.07] transition-all group"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-white truncate">{w.name}</div>
+                  <div className="text-[11px] text-white/40">
+                    {info.hasData ? `${t("day")} ${info.day}` : t("new_world")}
+                  </div>
+                </div>
+                <button
+                  onClick={() => onSelect(w.id)}
+                  className="shrink-0 rounded-lg bg-gradient-to-r from-amber-300 to-orange-400 px-3 py-1.5 text-xs font-bold text-[#1a1205] opacity-80 group-hover:opacity-100 hover:scale-105 transition-all"
+                >
+                  ▶ {t("play")}
+                </button>
+                <button
+                  onClick={() => deleteWorld(w.id)}
+                  className="shrink-0 rounded-lg border border-rose-400/20 bg-rose-500/10 px-2 py-1.5 text-xs text-rose-300/70 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 transition-all"
+                  title={t("delete_world")}
+                >
+                  🗑
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay: () => void; onContinue?: () => void; onSelectWorld?: (id: number) => void }) {
   useT();
   const [navSolid, setNavSolid] = useState(false);
   const [scrollY, setScrollY] = useState(0);
   const [showTopBtn, setShowTopBtn] = useState(false);
+  const [showWorlds, setShowWorlds] = useState(false);
   const heroRef = useRef<HTMLDivElement | null>(null);
   const heroImgRef = useRef<HTMLImageElement | null>(null);
   const hasSave = Engine.hasSave();
@@ -135,7 +273,6 @@ export default function Landing({ onPlay, onContinue, onWorlds }: { onPlay: () =
             ))}
           </div>
           <div className="flex items-center gap-2">
-            {/* language switcher */}
             <select
               value={getLang()}
               onChange={(e) => setLang(e.target.value as any)}
@@ -148,14 +285,6 @@ export default function Landing({ onPlay, onContinue, onWorlds }: { onPlay: () =
                 </option>
               ))}
             </select>
-            {onWorlds && (
-              <button
-                onClick={onWorlds}
-                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 backdrop-blur transition-colors hover:bg-white/15"
-              >
-                🌍 {t("worlds")}
-              </button>
-            )}
             {hasSave && onContinue && (
               <button
                 onClick={onContinue}
@@ -175,7 +304,7 @@ export default function Landing({ onPlay, onContinue, onWorlds }: { onPlay: () =
       </nav>
 
       {/* ===== HERO ===== */}
-      <section ref={heroRef} id="top" className="relative flex h-screen min-h-[640px] items-center justify-center overflow-hidden">
+      <section ref={heroRef} id="top" className="relative flex min-h-screen items-center justify-center overflow-hidden pb-8 pt-20">
         <img ref={heroImgRef} src={sandboxBg} alt="" className="anim-slow-zoom absolute inset-0 h-full w-full object-cover transition-transform duration-75" />
         <div className="absolute inset-0 bg-gradient-to-b from-[#070a12]/40 via-[#070a12]/50 to-[#070a12]" />
         <div className="absolute inset-0 bg-gradient-to-r from-[#070a12]/80 via-transparent to-[#070a12]/80" />
@@ -208,20 +337,31 @@ export default function Landing({ onPlay, onContinue, onWorlds }: { onPlay: () =
             >
               <span className="inline-flex items-center gap-2">▶ {t("play_free")}</span>
             </button>
-            {onWorlds && (
-              <button
-                onClick={onWorlds}
-                className="rounded-2xl border border-white/20 bg-white/5 px-8 py-4 text-lg font-semibold text-white/90 backdrop-blur transition-all hover:scale-105 hover:bg-white/15 hover:shadow-[0_0_30px_rgba(255,255,255,0.15)]"
-              >
-                🌍 {t("worlds")}
-              </button>
-            )}
             <button
               onClick={() => scrollToId("story")}
               className="rounded-2xl border border-white/25 bg-white/5 px-8 py-4 text-lg font-semibold text-white/90 backdrop-blur transition-colors hover:bg-white/15"
             >
               {t("learn_more")}
             </button>
+          </div>
+
+          {/* ===== INLINE WORLD PICKER ===== */}
+          <div className="mt-8">
+            {!showWorlds ? (
+              <button
+                onClick={() => setShowWorlds(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-sm font-semibold text-white/80 backdrop-blur transition-all hover:bg-white/12 hover:border-amber-300/30 hover:scale-105"
+              >
+                🌍 {t("worlds")} <span className="text-white/40 text-xs">▾</span>
+              </button>
+            ) : (
+              <div className="anim-fade rounded-2xl border border-white/10 bg-black/40 p-4 backdrop-blur-md shadow-2xl">
+                <WorldPicker
+                  onSelect={(id) => { onSelectWorld?.(id); }}
+                  onBack={() => setShowWorlds(false)}
+                />
+              </div>
+            )}
           </div>
         </div>
         <button onClick={() => scrollToId("story")} className="scroll-hint absolute bottom-8 left-1/2 -translate-x-1/2 text-3xl text-white/60">

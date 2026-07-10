@@ -389,54 +389,68 @@ export class Engine {
   private saveKey(): string { return SAVE_KEY_PREFIX + this.currentWorldId; }
 
   // ---------- multi-world management ----------
-  static getWorldList(): number[] {
+  static getWorldList(): { id: number; name: string }[] {
     try {
       const raw = localStorage.getItem(WORLD_LIST_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // migrate old number[] format
+        if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === "number") {
+          const migrated: { id: number; name: string }[] = parsed.map((id: number, i: number) => ({ id, name: `World ${i + 1}` }));
+          Engine.saveWorldList(migrated);
+          return migrated;
+        }
+        return parsed;
+      }
     } catch { /* ignore */ }
     // migrate old single save
     try {
       const old = localStorage.getItem("terralite_save_v1");
       if (old) {
-        const list = [0];
+        const list = [{ id: 0, name: "World 1" }];
         localStorage.setItem(WORLD_LIST_KEY, JSON.stringify(list));
-        // rename old save to new key
         localStorage.setItem(SAVE_KEY_PREFIX + "0", old);
         localStorage.removeItem("terralite_save_v1");
         return list;
       }
     } catch { /* ignore */ }
-    return [0];
+    return [];
   }
 
-  static saveWorldList(list: number[]) {
+  static saveWorldList(list: { id: number; name: string }[]) {
     try {
       localStorage.setItem(WORLD_LIST_KEY, JSON.stringify(list));
     } catch { /* ignore */ }
   }
 
-  static createNewWorld(): number {
+  static createNewWorld(name: string): number {
     const list = Engine.getWorldList();
-    const nextId = list.length > 0 ? Math.max(...list) + 1 : 0;
-    list.push(nextId);
+    const nextId = list.length > 0 ? Math.max(...list.map((w) => w.id)) + 1 : 0;
+    list.push({ id: nextId, name });
     Engine.saveWorldList(list);
     return nextId;
   }
 
   static deleteWorld(id: number) {
     let list = Engine.getWorldList();
-    list = list.filter((wid) => wid !== id);
+    list = list.filter((w) => w.id !== id);
     Engine.saveWorldList(list);
     try {
       localStorage.removeItem(SAVE_KEY_PREFIX + id);
     } catch { /* ignore */ }
   }
 
+  static renameWorld(id: number, name: string) {
+    const list = Engine.getWorldList();
+    const w = list.find((w) => w.id === id);
+    if (w) { w.name = name; Engine.saveWorldList(list); }
+  }
+
   static hasSave(): boolean {
     try {
       const list = Engine.getWorldList();
-      return list.length > 0 && list.some((id) => {
-        try { return localStorage.getItem(SAVE_KEY_PREFIX + id) !== null; }
+      return list.length > 0 && list.some((w) => {
+        try { return localStorage.getItem(SAVE_KEY_PREFIX + w.id) !== null; }
         catch { return false; }
       });
     } catch {
