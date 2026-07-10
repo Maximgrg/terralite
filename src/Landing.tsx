@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import sandboxBg from "./assets/sandbox-bg.jpg";
 import skyBg from "./assets/bg_sky.jpg";
 import atlasBg from "./assets/char_atlas.jpg";
 import { useT, t, LANGS, getLang, setLang } from "./i18n";
+import { Engine } from "./engine";
 
 /* scroll-reveal wrapper */
 function Reveal({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
@@ -38,14 +39,46 @@ function scrollToId(id: string) {
 
 const motes = Array.from({ length: 18 }, () => ({ left: Math.random() * 100, delay: Math.random() * 8, dur: 8 + Math.random() * 10, size: 2 + Math.random() * 4 }));
 
-export default function Landing({ onPlay }: { onPlay: () => void }) {
+export default function Landing({ onPlay, onContinue }: { onPlay: () => void; onContinue?: () => void }) {
   useT();
   const [navSolid, setNavSolid] = useState(false);
-  useEffect(() => {
-    const onScroll = () => setNavSolid(window.scrollY > 60);
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+  const [scrollY, setScrollY] = useState(0);
+  const [showTopBtn, setShowTopBtn] = useState(false);
+  const heroRef = useRef<HTMLDivElement | null>(null);
+  const heroImgRef = useRef<HTMLImageElement | null>(null);
+  const hasSave = Engine.hasSave();
+
+  const handleScroll = useCallback(() => {
+    const y = window.scrollY;
+    setNavSolid(y > 60);
+    setScrollY(y);
+    setShowTopBtn(y > 400);
   }, []);
+
+  useEffect(() => {
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [handleScroll]);
+
+  useEffect(() => {
+    const el = heroImgRef.current;
+    if (!el) return;
+    const onMouse = (e: MouseEvent) => {
+      const { innerWidth, innerHeight } = window;
+      const x = (e.clientX / innerWidth - 0.5) * 8;
+      const y = (e.clientY / innerHeight - 0.5) * 8;
+      el.style.transform = `translate(${x}px, ${y}px)`;
+    };
+    window.addEventListener("mousemove", onMouse, { passive: true });
+    return () => window.removeEventListener("mousemove", onMouse);
+  }, []);
+
+  const scrollTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  const docHeight = typeof document !== "undefined" ? Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) - window.innerHeight : 1;
+  const progress = docHeight > 0 ? Math.min((scrollY / docHeight) * 100, 100) : 0;
 
   const NAV = [
     { id: "story", label: t("nav_story") },
@@ -82,8 +115,13 @@ export default function Landing({ onPlay }: { onPlay: () => void }) {
 
   return (
     <div className="landing-scroll min-h-screen w-full overflow-y-auto bg-[#070a12] text-white">
+      {/* ===== SCROLL PROGRESS ===== */}
+      <div className="fixed inset-x-0 top-0 z-[60] h-0.5">
+        <div className="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all duration-150" style={{ width: `${progress}%` }} />
+      </div>
+
       {/* ===== NAV ===== */}
-      <nav className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${navSolid ? "glass border-b border-white/10 py-3" : "py-5"}`}>
+      <nav className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${navSolid ? "border-b border-white/10 bg-[#070a12]/80 py-3 backdrop-blur-lg" : "bg-transparent py-5"}`}>
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5">
           <button onClick={() => scrollToId("top")} className="flex items-center gap-2">
             <span className="text-2xl">⛏️</span>
@@ -110,6 +148,14 @@ export default function Landing({ onPlay }: { onPlay: () => void }) {
                 </option>
               ))}
             </select>
+            {hasSave && onContinue && (
+              <button
+                onClick={onContinue}
+                className="rounded-xl bg-gradient-to-r from-emerald-400 to-green-500 px-5 py-2 text-sm font-bold text-emerald-950 shadow-[0_0_20px_rgba(80,220,120,0.5)] transition-transform hover:scale-105"
+              >
+                ▶ {t("cont_world")}
+              </button>
+            )}
             <button
               onClick={onPlay}
               className="rounded-xl bg-gradient-to-r from-amber-300 to-orange-400 px-5 py-2 text-sm font-bold text-[#1a1205] shadow-[0_0_20px_rgba(255,180,80,0.5)] transition-transform hover:scale-105"
@@ -121,8 +167,8 @@ export default function Landing({ onPlay }: { onPlay: () => void }) {
       </nav>
 
       {/* ===== HERO ===== */}
-      <section id="top" className="relative flex h-screen min-h-[640px] items-center justify-center overflow-hidden">
-        <img src={sandboxBg} alt="" className="anim-slow-zoom absolute inset-0 h-full w-full object-cover" />
+      <section ref={heroRef} id="top" className="relative flex h-screen min-h-[640px] items-center justify-center overflow-hidden">
+        <img ref={heroImgRef} src={sandboxBg} alt="" className="anim-slow-zoom absolute inset-0 h-full w-full object-cover transition-transform duration-75" />
         <div className="absolute inset-0 bg-gradient-to-b from-[#070a12]/40 via-[#070a12]/50 to-[#070a12]" />
         <div className="absolute inset-0 bg-gradient-to-r from-[#070a12]/80 via-transparent to-[#070a12]/80" />
         {motes.map((m, i) => (
@@ -140,6 +186,14 @@ export default function Landing({ onPlay }: { onPlay: () => void }) {
           <p className="mt-3 text-lg tracking-[0.5em] text-emerald-100 drop-shadow sm:text-2xl">REALMS UNBOUND</p>
           <p className="mx-auto mt-6 max-w-xl text-base text-white/75 sm:text-lg">{t("hero_p")}</p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            {hasSave && onContinue && (
+              <button
+                onClick={onContinue}
+                className="rounded-2xl bg-gradient-to-r from-emerald-400 via-green-500 to-emerald-600 px-10 py-4 text-lg font-black text-emerald-950 shadow-[0_0_36px_rgba(80,220,120,0.6)] transition-all hover:scale-105 hover:shadow-[0_0_52px_rgba(80,220,120,0.9)]"
+              >
+                <span className="inline-flex items-center gap-2">▶ {t("cont_world")}</span>
+              </button>
+            )}
             <button
               onClick={onPlay}
               className="rounded-2xl bg-gradient-to-r from-amber-300 via-orange-400 to-amber-500 px-10 py-4 text-lg font-black text-[#1a1205] shadow-[0_0_36px_rgba(255,170,70,0.6)] transition-all hover:scale-105 hover:shadow-[0_0_52px_rgba(255,170,70,0.9)]"
@@ -316,6 +370,19 @@ export default function Landing({ onPlay }: { onPlay: () => void }) {
           </Reveal>
         </div>
       </section>
+
+      {/* ===== SCROLL TO TOP ===== */}
+      {showTopBtn && (
+        <button
+          onClick={scrollTop}
+          className="fixed bottom-8 right-8 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-amber-400/20 text-amber-300 shadow-lg backdrop-blur-md transition-all hover:bg-amber-400/40 hover:scale-110"
+          aria-label="Scroll to top"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+          </svg>
+        </button>
+      )}
 
       {/* ===== FOOTER ===== */}
       <footer className="border-t border-white/10 bg-[#05070d] py-10">

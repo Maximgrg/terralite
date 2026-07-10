@@ -117,6 +117,20 @@ const en: Dict = {
   end_tbc: "TO BE CONTINUED...", end_chapter2: "Chapter II is near",
   terralite_subtitle: "TERRALITE: Realms Unbound", made_by: "Made by", thanks: "Thanks for playing this saga. Your world awaits — build, explore and create on.",
   continue_world: "Continue in your world", skip: "Skip",
+  near_portal: "Press [E] to travel between worlds",
+  world: "World",
+  world_n: "World {n}",
+  save_quit: "Save & Quit",
+  controls_btn: "Controls",
+  saving: "Saving...",
+  rotten_flesh: "Rotten Flesh",
+  d_rotten_flesh: "Eat to heal 5 HP (risky!)",
+  crystal_shard: "Crystal Shard",
+  i_crystal_shard: "Crystal Shard",
+  preview: "Preview",
+  critical: "CRITICAL!",
+  cont_world: "Continue",
+  cont_game: "Continue in your world",
 };
 
 const ru: Dict = {
@@ -213,6 +227,20 @@ const ru: Dict = {
   end_tbc: "ПРОДОЛЖЕНИЕ СЛЕДУЕТ...", end_chapter2: "Глава II уже близко",
   terralite_subtitle: "TERRALITE: Realms Unbound", made_by: "Создано", thanks: "Спасибо за прохождение. Твой мир ждёт — строй, исследуй и твори дальше.",
   continue_world: "Продолжить в своём мире", skip: "Пропустить",
+  near_portal: "[E] — перейти между мирами",
+  world: "Мир",
+  world_n: "Мир {n}",
+  save_quit: "Сохранить и выйти",
+  controls_btn: "Управление",
+  saving: "Сохранение...",
+  rotten_flesh: "Гнилая плоть",
+  d_rotten_flesh: "Съешь, чтобы восстановить 5 HP (рискованно!)",
+  crystal_shard: "Осколок кристалла",
+  i_crystal_shard: "Осколок кристалла",
+  preview: "Предпросмотр",
+  critical: "КРИТИЧЕСКИЙ!",
+  cont_world: "Продолжить",
+  cont_game: "Продолжить в своём мире",
 };
 
 const ro: Dict = {
@@ -309,6 +337,20 @@ const ro: Dict = {
   end_tbc: "URMEAZĂ...", end_chapter2: "Capitolul II e aproape",
   terralite_subtitle: "TERRALITE: Realms Unbound", made_by: "Creat de", thanks: "Mulțumim că ai jucat. Lumea ta te așteaptă — construiește, explorează și creează mai departe.",
   continue_world: "Continuă în lumea ta", skip: "Sari peste",
+  near_portal: "Apasă [E] pentru a călători între lumi",
+  world: "Lumea",
+  world_n: "Lumea {n}",
+  save_quit: "Salvează și ieși",
+  controls_btn: "Comenzi",
+  saving: "Se salvează...",
+  rotten_flesh: "Carne putrezită",
+  d_rotten_flesh: "Mănâncă pentru a vindeca 5 HP (riscant!)",
+  crystal_shard: "Cristal",
+  i_crystal_shard: "Cristal",
+  preview: "Previzualizare",
+  critical: "CRITIC!",
+  cont_world: "Continuă",
+  cont_game: "Continuă în lumea ta",
 };
 
 const DICTS: Record<Lang, Dict> = { en, ru, ro };

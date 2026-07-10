@@ -2,7 +2,7 @@
 // Physics, mining/building, crafting, enemies, boss, day/night, lighting, quests, rendering.
 
 import {
-  AIR, STONE, WOOD, LEAVES, COPPER, IRON, TORCH, WORKBENCH, FURNACE,
+  AIR, STONE, WOOD, LEAVES, COPPER, IRON, TORCH, WORKBENCH, FURNACE, PORTAL,
   TILE, TILES, isSolid, ITEMS, RECIPES, generateWorld, getTile, setTile,
   type World, type Recipe,
 } from "./world";
@@ -58,6 +58,10 @@ export interface EngineState {
   stations: { workbench: boolean; furnace: boolean };
   craftable: string[];
   depth: number;
+  nearPortal: boolean;
+  savedAt: number;
+  playerTX: number;
+  playerTY: number;
 }
 export interface EngineCallbacks {
   onState: (s: EngineState) => void;
@@ -70,7 +74,7 @@ interface Enemy {
   x: number; y: number; vx: number; vy: number;
   w: number; h: number; hp: number; maxHp: number;
   facing: number; onGround: boolean; hopT: number; hitFlash: number; t: number;
-  spawnT: number; knock: number;
+  spawnT: number; knock: number; swoopT: number;
 }
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string; grav: number; }
 interface FloatText { x: number; y: number; vy: number; life: number; text: string; color: string; }
@@ -145,6 +149,13 @@ export class Engine {
   private mineProg = 0;
   private mineSfxT = 0;
 
+  // fall damage
+  private fallDistance = 0;
+
+  // screen shake
+  private shakeX = 0;
+  private shakeY = 0;
+
   // entities
   private enemies: Enemy[] = [];
   private particles: Particle[] = [];
@@ -161,6 +172,9 @@ export class Engine {
   private gameover = false;
   private victory = false;
 
+  // multi-world portals
+  private currentWorldId = 0;
+
   // quests
   private questIndex = 0;
   private stoneMined = 0;
@@ -174,6 +188,7 @@ export class Engine {
 
   // autosave
   private saveTimer = 5;
+  private saveCounter = 0;
   // fps overlay
   private showFps = false;
   private fps = 0;
@@ -205,6 +220,21 @@ export class Engine {
     const loaded = mode === "auto" ? this.loadGame() : null;
     if (loaded) {
       this.applySave(loaded);
+      if (this.currentWorldId > 0) {
+        // Regenerate world with seed = worldId when loading a portal world
+        this.world = generateWorld(this.currentWorldId);
+        // clear a small pocket so the player doesn't get stuck in a tree
+        const sx = this.world.spawnX;
+        const surf = this.world.surfaceY[sx];
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dy = 5; dy >= 1; dy--) {
+            const t = getTile(this.world, sx + dx, surf - dy);
+            if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
+          }
+        }
+        this.px = this.world.spawnX * TILE;
+        this.py = this.world.spawnY * TILE;
+      }
     } else {
       this.world = generateWorld();
       this.resetProgress();
@@ -301,6 +331,14 @@ export class Engine {
   }
   getPlaceMode(): boolean { return this.placeMode; }
 
+  // ---------- public API for UI ----------
+  getWorldForMinimap(): { w: number; h: number; tiles: Uint8Array } | null {
+    return this.world ? { w: this.world.w, h: this.world.h, tiles: this.world.tiles } : null;
+  }
+  getPlayerTileX(): number { return Math.floor(this.px / TILE); }
+  getPlayerTileY(): number { return Math.floor(this.py / TILE); }
+  saveGameNow() { this.saveGame(); }
+
   // ---------- cheat / god menu ----------
   toggleFly(): boolean { this.flying = !this.flying; return this.flying; }
   toggleGod(): boolean { this.godMode = !this.godMode; return this.godMode; }
@@ -383,13 +421,18 @@ export class Engine {
     this.pvx = 0;
     this.pvy = 0;
     this.pface = 1;
+    this.currentWorldId = 0;
+    this.fallDistance = 0;
+    this.shakeX = 0;
+    this.shakeY = 0;
   }
 
   private saveGame() {
     if (!this.world) return;
+    this.saveCounter = (this.saveCounter + 1) % 100000;
     try {
       const data = {
-        v: 1,
+        v: 2,
         tiles: u8ToB64(this.world.tiles),
         surfaceY: Array.from(this.world.surfaceY),
         w: this.world.w,
@@ -412,6 +455,7 @@ export class Engine {
         stoneMined: this.stoneMined,
         copperMined: this.copperMined,
         ironMined: this.ironMined,
+        currentWorldId: this.currentWorldId,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {
@@ -454,8 +498,12 @@ export class Engine {
     this.stoneMined = d.stoneMined ?? 0;
     this.copperMined = d.copperMined ?? 0;
     this.ironMined = d.ironMined ?? 0;
+    this.currentWorldId = d.currentWorldId ?? 0;
     this.gameover = false;
     this.victory = false;
+    this.fallDistance = 0;
+    this.shakeX = 0;
+    this.shakeY = 0;
   }
 
   private clearSave() {
@@ -536,6 +584,12 @@ export class Engine {
       this.hp = Math.min(this.maxHp, this.hp + 25);
       audio.playSfx("pickup");
       this.float(this.px, this.py - 30, "+25 HP", "#7fff8f");
+    }
+    if (id === "rotten_flesh") {
+      this.removeItem("rotten_flesh", 1);
+      this.hp = Math.min(this.maxHp, this.hp + 5);
+      audio.playSfx("pickup");
+      this.float(this.px, this.py - 30, "+5 HP", "#7fff8f");
     }
   }
 
@@ -739,6 +793,15 @@ export class Engine {
       }
     }
 
+    // decay screen shake
+    if (this.shakeX !== 0 || this.shakeY !== 0) {
+      const decay = Math.max(0, 1 - dt / 0.15);
+      this.shakeX *= decay;
+      this.shakeY *= decay;
+      if (Math.abs(this.shakeX) < 0.5) this.shakeX = 0;
+      if (Math.abs(this.shakeY) < 0.5) this.shakeY = 0;
+    }
+
     this.updatePlayer(dt);
     this.updateMining(dt);
     this.updatePlacing(dt);
@@ -806,10 +869,33 @@ export class Engine {
       }
       this.pvy += GRAVITY * dt;
       if (this.pvy > 900) this.pvy = 900;
+
+      // track fall distance
+      if (!this.onGround && this.pvy > 0) {
+        this.fallDistance += this.pvy * dt;
+      }
+
       this.integrateX(dt, 18, 44);
       const wasGround = this.onGround;
       this.onGround = this.integrateY(dt, 18, 44);
-      if (!wasGround && this.onGround) audio.playSfx("land");
+      if (!wasGround && this.onGround) {
+        audio.playSfx("land");
+        // fall damage
+        if (this.fallDistance > 600 && !this.godMode) {
+          const rawDmg = Math.floor((this.fallDistance - 600) / 30);
+          const fallDmg = Math.min(40, Math.max(1, rawDmg - this.defense));
+          this.hp -= fallDmg;
+          this.invuln = 0.8;
+          this.hurtT = 3;
+          this.float(this.px, this.py - 30, `-${fallDmg} fall`, "#ff6b6b");
+          for (let i = 0; i < 8; i++) this.dust(this.px, this.py, "#ff6b6b");
+          this.shakeX = 8;
+          this.shakeY = 5;
+          audio.playSfx("hurt");
+          if (this.hp <= 0) { this.hp = 0; this.die(); }
+        }
+        this.fallDistance = 0;
+      }
     }
 
     // world bounds
@@ -817,6 +903,55 @@ export class Engine {
     if (!this.flying && !this.godMode && this.py > this.world.h * TILE + 200) {
       this.hp = 0;
       this.die();
+    }
+
+    // portal teleport
+    const feetTX = Math.floor(this.px / TILE);
+    const feetTY = Math.floor((this.py + 22) / TILE);
+    if (getTile(this.world, feetTX, feetTY) === PORTAL) {
+      this.currentWorldId++;
+      this.world = generateWorld(this.currentWorldId);
+      // find a portal in the new world to spawn at
+      let found = false;
+      for (let x = 0; x < this.world.w && !found; x++) {
+        for (let y = 0; y < this.world.h && !found; y++) {
+          if (getTile(this.world, x, y) === PORTAL) {
+            // clear nearby trees so player doesn't get stuck
+            for (let dx = -2; dx <= 2; dx++) {
+              for (let dy = 5; dy >= 1; dy--) {
+                const t = getTile(this.world, x + dx, y - dy);
+                if (t === WOOD || t === LEAVES) setTile(this.world, x + dx, y - dy, AIR);
+              }
+            }
+            this.px = x * TILE;
+            this.py = (y - 2) * TILE;
+            this.pvx = 0;
+            this.pvy = 0;
+            this.onGround = false;
+            this.fallDistance = 0;
+            found = true;
+          }
+        }
+      }
+      if (!found) {
+        // fallback to spawn
+        const sx = this.world.spawnX;
+        const surf = this.world.surfaceY[sx];
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dy = 5; dy >= 1; dy--) {
+            const t = getTile(this.world, sx + dx, surf - dy);
+            if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
+          }
+        }
+        this.px = sx * TILE;
+        this.py = this.world.spawnY * TILE;
+        this.pvx = 0;
+        this.pvy = 0;
+        this.onGround = false;
+        this.fallDistance = 0;
+      }
+      this.showBanner(`World ${this.currentWorldId}`, "You step through the portal…");
+      this.saveGame();
     }
   }
 
@@ -987,13 +1122,21 @@ export class Engine {
   }
 
   private damageEnemy(e: Enemy, dmg: number) {
+    // critical hit from above (20% chance, 1.5x damage)
+    let crit = false;
+    if (this.py < e.y - e.h / 2 && Math.random() < 0.2) {
+      dmg = Math.round(dmg * 1.5);
+      crit = true;
+    }
     e.hp -= dmg;
     e.hitFlash = 0.12;
     e.knock = this.pface;
     e.vx += this.pface * 160;
     e.vy = -120;
-    this.float(e.x, e.y - 20, `${Math.round(dmg)}`, "#ffd0d0");
+    this.float(e.x, e.y - 20, `${Math.round(dmg)}${crit ? "!" : ""}`, crit ? "#ffeb3b" : "#ffd0d0");
     for (let i = 0; i < 5; i++) this.dust(e.x, e.y, "#ff9b9b");
+    this.shakeX = 4;
+    this.shakeY = 3;
     if (e.hp <= 0) this.killEnemy(e);
   }
 
@@ -1002,11 +1145,11 @@ export class Engine {
     if (idx < 0) return;
     this.enemies.splice(idx, 1);
     audio.playSfx("enemyDie");
-    for (let i = 0; i < 14; i++) this.dust(e.x, e.y, e.type === "zombie" ? "#6fae5a" : e.type === "bat" ? "#9a7bff" : "#5fd06f");
+    for (let i = 0; i < 8; i++) this.dust(e.x, e.y, e.type === "zombie" ? "#6fae5a" : e.type === "bat" ? "#9a7bff" : "#5fd06f");
     if (e.type === "king") {
       this.kingDefeated = true;
-      this.addItem("gold_bar", 8);
-      this.addItem("diamond", 5);
+      this.addItem("gold_bar", 15);
+      this.addItem("diamond", 10);
       this.addItem("gel", 30);
       this.showBanner("THE KING FALLS", "Dawn breaks eternal over your realm");
       // Instant victory: automatically advance all quests to completed
@@ -1026,6 +1169,7 @@ export class Engine {
     }
     if (e.type === "zombie") {
       if (Math.random() < 0.4) this.addItem("wood", 1 + Math.floor(Math.random() * 2));
+      if (Math.random() < 0.3) this.addItem("rotten_flesh", 1);
     }
   }
 
@@ -1044,9 +1188,9 @@ export class Engine {
       type, x: sx, y: (surf - 2) * TILE, vx: 0, vy: 0,
       w: type === "zombie" ? 22 : 30, h: type === "zombie" ? 42 : 26,
       hp: type === "zombie" ? 34 : 18, maxHp: type === "zombie" ? 34 : 18,
-      facing: -1, onGround: false, hopT: Math.random(), hitFlash: 0, t: 0, spawnT: 0, knock: 0,
+      facing: -1, onGround: false, hopT: Math.random(), hitFlash: 0, t: 0, spawnT: 0, knock: 0, swoopT: 0,
     };
-    if (type === "bat") { e.y = (surf - 6) * TILE; e.h = 22; e.w = 26; e.hp = e.maxHp = 14; }
+    if (type === "bat") { e.y = (surf - 6) * TILE; e.h = 22; e.w = 26; e.hp = e.maxHp = 18; e.swoopT = 2 + Math.random() * 3; }
     this.enemies.push(e);
   }
 
@@ -1055,7 +1199,7 @@ export class Engine {
     const surf = this.world.surfaceY[stx];
     const e: Enemy = {
       type: "king", x: this.px, y: (surf - 6) * TILE, vx: 0, vy: 0,
-      w: 70, h: 60, hp: 700, maxHp: 700, facing: -1, onGround: false, hopT: 0, hitFlash: 0, t: 0, spawnT: 4, knock: 0,
+      w: 70, h: 60, hp: 700, maxHp: 700, facing: -1, onGround: false, hopT: 0, hitFlash: 0, t: 0, spawnT: 4, knock: 0, swoopT: 0,
     };
     this.enemies.push(e);
     audio.playSfx("bossSpawn");
@@ -1064,18 +1208,33 @@ export class Engine {
   }
 
   private updateEnemies(dt: number) {
-    for (const e of this.enemies) {
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i];
       e.t += dt;
       e.hitFlash = Math.max(0, e.hitFlash - dt);
       e.spawnT -= dt;
       const dx = this.px - e.x;
       e.facing = dx >= 0 ? 1 : -1;
       if (e.type === "bat") {
-        // flies toward player with sine bob
-        e.vy += (this.py - 60 - e.y) * 1.4 * dt;
-        e.vy = Math.max(-260, Math.min(260, e.vy));
-        e.vx += Math.sign(dx) * 60 * dt;
-        e.vx = Math.max(-150, Math.min(150, e.vx));
+        e.swoopT -= dt;
+        if (e.swoopT > 0) {
+          // normal flight
+          e.vy += (this.py - 60 - e.y) * 1.4 * dt;
+          e.vy = Math.max(-260, Math.min(260, e.vy));
+          e.vx += Math.sign(dx) * 60 * dt;
+          e.vx = Math.max(-150, Math.min(150, e.vx));
+        } else if (e.swoopT > -0.3) {
+          // swoop phase: rapid dive toward player
+          const targetX = this.px;
+          const targetY = this.py - 30;
+          e.vx += Math.sign(targetX - e.x) * 400 * dt;
+          e.vy += Math.sign(targetY - e.y) * 400 * dt;
+          e.vx = Math.max(-500, Math.min(500, e.vx));
+          e.vy = Math.max(-500, Math.min(500, e.vy));
+        } else {
+          // reset swoop cooldown
+          e.swoopT = 2 + Math.random() * 3;
+        }
         // collide with solid tiles (so bats can't fly through your walls)
         this.flyCollide(e, dt);
         e.y += Math.sin(e.t * 8) * 1.2;
@@ -1085,19 +1244,22 @@ export class Engine {
         e.hopT -= dt;
         if (e.type === "king") {
           if (e.onGround && e.hopT <= 0) {
-            e.vy = -460; e.vx = e.facing * (180 + Math.random() * 80); e.hopT = 1.1;
+            const rage = e.hp < e.maxHp / 2;
+            e.vy = -460;
+            e.vx = e.facing * (rage ? 280 : 180 + Math.random() * 80);
+            e.hopT = rage ? 0.7 : 1.1;
             audio.playSfx("slime");
             if (e.spawnT <= 0) {
-              // spawn minions
-              for (let i = 0; i < 2; i++) {
-                this.enemies.push({ type: "slime", x: e.x + (i ? 30 : -30), y: e.y - 10, vx: (i ? 1 : -1) * 120, vy: -200, w: 26, h: 22, hp: 16, maxHp: 16, facing: i ? 1 : -1, onGround: false, hopT: 0.5, hitFlash: 0, t: 0, spawnT: 0, knock: 0 });
+              const minionCount = rage ? 3 : 2;
+              for (let mi = 0; mi < minionCount; mi++) {
+                this.enemies.push({ type: "slime", x: e.x + (mi % 2 === 0 ? 30 : -30), y: e.y - 10, vx: (mi % 2 === 0 ? 1 : -1) * 120, vy: -200, w: 26, h: 22, hp: 16, maxHp: 16, facing: mi % 2 === 0 ? 1 : -1, onGround: false, hopT: 0.5, hitFlash: 0, t: 0, spawnT: 0, knock: 0, swoopT: 0 });
               }
-              e.spawnT = 5;
+              e.spawnT = rage ? 3 : 5;
             }
           }
         } else if (e.onGround && e.hopT <= 0) {
           e.vy = e.type === "zombie" ? -300 : -260;
-          e.vx = e.facing * (e.type === "zombie" ? 70 : 90);
+          e.vx = e.facing * (e.type === "zombie" ? 100 : 90);
           e.hopT = e.type === "zombie" ? 0.7 : 1.1;
           audio.playSfx(e.type === "zombie" ? "slime" : "slime");
         }
@@ -1106,11 +1268,16 @@ export class Engine {
       // contact damage
       const overlap = Math.abs(e.x - this.px) < (e.w / 2 + 9) && Math.abs(e.y - this.py) < (e.h / 2 + 22);
       if (overlap && this.invuln <= 0) {
-        this.hurt(e.type === "king" ? 22 : e.type === "zombie" ? 12 : 8);
+        this.hurt(e.type === "king" ? 22 : e.type === "zombie" ? 14 : 8);
       }
-      // cleanup far away
-      if (Math.abs(e.x - this.px) > this.viewW) {
-        if (Math.random() < 0.01) { this.enemies.splice(this.enemies.indexOf(e), 1); }
+      // despawning: far away enemies are removed
+      const dist = Math.abs(e.x - this.px);
+      if (dist > this.viewW * 2) {
+        this.enemies.splice(i, 1);
+      } else if (dist > this.viewW) {
+        if (Math.random() < 0.005) {
+          this.enemies.splice(i, 1);
+        }
       }
     }
   }
@@ -1304,6 +1471,15 @@ export class Engine {
     }
     const q = QUESTS[this.questIndex];
     const boss = this.enemies.find((e) => e.type === "king");
+    const pxTile = Math.floor(this.px / TILE);
+    const pyTile = Math.floor(this.py / TILE);
+    let nearPortal = false;
+    for (let dy = -3; dy <= 3; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        if (getTile(this.world, pxTile + dx, pyTile + dy) === PORTAL) { nearPortal = true; break; }
+      }
+      if (nearPortal) break;
+    }
     this.cb.onState({
       hp: Math.round(this.hp),
       maxHp: this.maxHp,
@@ -1323,6 +1499,10 @@ export class Engine {
       stations: { workbench: this.workbenchCount > 0, furnace: this.furnaceCount > 0 },
       craftable,
       depth: Math.max(0, Math.floor(this.py / TILE) - this.world.surfaceY[Math.floor(this.px / TILE)]),
+      nearPortal,
+      savedAt: this.saveCounter,
+      playerTX: pxTile,
+      playerTY: pyTile,
     });
   }
 
@@ -1341,7 +1521,9 @@ export class Engine {
     const ty1 = Math.min(this.world.h - 1, Math.ceil((this.camY + this.viewH) / TILE) + 1);
 
     ctx.save();
-    ctx.translate(-Math.round(this.camX), -Math.round(this.camY));
+    const sx = Math.round(this.shakeX);
+    const sy = Math.round(this.shakeY);
+    ctx.translate(-Math.round(this.camX) + sx, -Math.round(this.camY) + sy);
     ctx.imageSmoothingEnabled = false;
 
     // background cave walls (behind empty tiles underground)
@@ -1367,6 +1549,19 @@ export class Engine {
     }
     if (this.mineTX >= 0) this.drawCracks(ctx);
     this.drawTarget(ctx);
+    // ghost placement preview
+    const ghostSlot = this.selectedSlot();
+    if (ghostSlot && ITEMS[ghostSlot.id]?.place !== undefined && this.withinReach(this.mouseTX, this.mouseTY)) {
+      const gtx = this.mouseTX;
+      const gty = this.mouseTY;
+      if (getTile(this.world, gtx, gty) === AIR) {
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        this.drawTile(ctx, gtx, gty, ITEMS[ghostSlot.id].place!);
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+    }
 
     // particles
     for (const p of this.particles) {
@@ -1481,6 +1676,11 @@ export class Engine {
           const r = TILE * 1.2;
           ctx.globalAlpha = 0.24;
           ctx.drawImage(spr, 0, 0, spr.width, spr.height, tx * TILE + TILE / 2 - r, ty * TILE + TILE * 0.7 - r, r * 2, r * 2);
+        } else if (id === PORTAL) {
+          const fl = 0.7 + 0.3 * Math.sin(this.frame * 0.2 + tx * 2.1);
+          const r = TILE * 2.0 * fl;
+          ctx.globalAlpha = 0.3 * fl;
+          ctx.drawImage(spr, 0, 0, spr.width, spr.height, tx * TILE + TILE / 2 - r, ty * TILE + TILE / 2 - r, r * 2, r * 2);
         }
       }
     }
@@ -1657,6 +1857,32 @@ export class Engine {
   private drawTile(ctx: CanvasRenderingContext2D, tx: number, ty: number, id: number) {
     const x = tx * TILE;
     const y = ty * TILE;
+    if (id === PORTAL) {
+      // animated portal (purple swirl)
+      const cx = x + TILE / 2;
+      const cy = y + TILE / 2;
+      const fl = 0.7 + 0.3 * Math.sin(this.frame * 0.15 + tx * 2.3 + ty * 1.7);
+      // glow
+      const og = ctx.createRadialGradient(cx, cy, 1, cx, cy, 20);
+      og.addColorStop(0, "rgba(180,100,220,0.6)");
+      og.addColorStop(1, "rgba(120,50,180,0)");
+      ctx.fillStyle = og;
+      ctx.fillRect(cx - 20, cy - 20, 40, 40);
+      // inner swirl
+      ctx.fillStyle = "#9b59b6";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 10 * fl, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#c39bd3";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 6 * fl, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#e8daef";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3 * fl, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
     if (id === TORCH) {
       // animated torch (pixel-art)
       const cx = x + TILE / 2;
@@ -1948,6 +2174,7 @@ export class Engine {
 
   private drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy) {
     const flash = e.hitFlash > 0;
+    const rage = e.type === "king" && e.hp < e.maxHp / 2;
     const OL = "#0a0f06";
     // drop shadow
     ctx.save();
@@ -1971,9 +2198,15 @@ export class Engine {
       ctx.fill();
       const g = ctx.createRadialGradient(-R * 0.3, cy - R * 0.4, 2, 0, cy, R);
       if (e.type === "king") {
-        g.addColorStop(0, "#7fe07f");
-        g.addColorStop(0.6, "#3aa83a");
-        g.addColorStop(1, "#1f6e22");
+        if (rage) {
+          g.addColorStop(0, "#ff7f7f");
+          g.addColorStop(0.6, "#c83030");
+          g.addColorStop(1, "#8f1e22");
+        } else {
+          g.addColorStop(0, "#7fe07f");
+          g.addColorStop(0.6, "#3aa83a");
+          g.addColorStop(1, "#1f6e22");
+        }
       } else {
         g.addColorStop(0, "#bff7c2");
         g.addColorStop(0.6, "#5fd06f");
@@ -2010,6 +2243,15 @@ export class Engine {
         ctx.fillStyle = "#3b9bff";
         ctx.fillRect(-R * 0.4 + 1, cy - R * squish - 9, 3, 3);
         ctx.fillRect(R * 0.4 - 4, cy - R * squish - 9, 3, 3);
+      }
+      // red tint overlay for rage mode
+      if (rage) {
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = "#ff0000";
+        ctx.beginPath();
+        ctx.ellipse(0, cy, R, R * squish, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
       }
     } else if (e.type === "zombie") {
       ctx.scale(e.facing, 1);

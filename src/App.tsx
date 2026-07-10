@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Engine, type EngineState } from "./engine";
-import { ITEMS, RECIPES, type Station } from "./world";
+import { AIR, GRASS, DIRT, STONE, WOOD, LEAVES, SAND, COPPER, IRON, GOLD, DIAMOND, COAL, PLANK, TORCH, GLASS, BEDROCK, WORKBENCH, FURNACE, PORTAL, WATER, ITEMS, RECIPES, type Station } from "./world";
 import { audio } from "./audio";
 import bg from "./assets/sandbox-bg.jpg";
 import Landing from "./Landing";
@@ -83,6 +83,90 @@ function Btn({
     <button onClick={onClick} className={`${base} ${styles[variant]} ${className}`}>
       {children}
     </button>
+  );
+}
+
+// ---------------- Minimap ----------------
+function tileMinimapColor(id: number): string {
+  switch (id) {
+    case AIR: return "#111111";
+    case GRASS: return "#4a8a2a";
+    case DIRT: return "#8a5a32";
+    case STONE: return "#8a8f9c";
+    case WOOD: return "#5a3219";
+    case LEAVES: return "#3f8f2f";
+    case SAND: return "#e0c878";
+    case COPPER: return "#c87a3a";
+    case IRON: return "#c9a98f";
+    case GOLD: return "#e7c84a";
+    case DIAMOND: return "#6fe6e0";
+    case COAL: return "#3a3d42";
+    case PLANK: return "#b07a43";
+    case TORCH: return "#ffcf6b";
+    case GLASS: return "#bfe6ef";
+    case BEDROCK: return "#2a2733";
+    case WORKBENCH: return "#9a6a3a";
+    case FURNACE: return "#5a5560";
+    case PORTAL: return "#9933ff";
+    case WATER: return "#3366cc";
+    default: return "#000000";
+  }
+}
+
+function Minimap({ engineRef, state }: { engineRef: React.MutableRefObject<Engine | null>; state: EngineState }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef(0);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const render = () => {
+      const eng = engineRef.current;
+      if (!eng) { rafRef.current = requestAnimationFrame(render); return; }
+      const world = eng.getWorldForMinimap();
+      if (!world) { rafRef.current = requestAnimationFrame(render); return; }
+
+      const scale = 4;
+      const mw = Math.min(Math.floor(world.w / scale), 120);
+      const mh = Math.min(Math.floor(world.h / scale), 120);
+      const yOff = Math.max(0, Math.floor((120 - mh) / 2));
+
+      ctx.fillStyle = "#111";
+      ctx.fillRect(0, 0, 120, 120);
+
+      for (let my = 0; my < mh; my++) {
+        for (let mx = 0; mx < mw; mx++) {
+          const tx = mx * scale;
+          const ty = my * scale;
+          if (tx >= world.w || ty >= world.h) continue;
+          const tileId = world.tiles[ty * world.w + tx];
+          ctx.fillStyle = tileMinimapColor(tileId);
+          ctx.fillRect(mx, yOff + my, 1, 1);
+        }
+      }
+
+      const ptx = Math.floor(state.playerTX / scale);
+      const pty = Math.floor(state.playerTY / scale);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(ptx - 1, yOff + pty - 1, 3, 3);
+
+      rafRef.current = requestAnimationFrame(render);
+    };
+    rafRef.current = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [engineRef, state]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={120}
+      height={120}
+      className="pointer-events-none"
+      style={{ imageRendering: "pixelated" }}
+    />
   );
 }
 
@@ -225,19 +309,31 @@ function Hud({
       {/* hotbar — sits ABOVE the touch controls on mobile */}
       <div className="absolute bottom-24 left-1/2 w-[94%] max-w-md -translate-x-1/2 sm:bottom-3">
         <div className="flex gap-0.5 rounded-2xl border border-white/10 bg-black/50 p-1 backdrop-blur-sm sm:gap-1 sm:p-1.5">
-          {s.inventory.slice(0, 10).map((slot, i) => (
-            <button
-              key={i}
-              onClick={() => onSelectSlot(i)}
-              className={`pointer-events-auto relative flex h-9 w-[10%] items-center justify-center rounded-lg border text-base transition-all sm:h-14 sm:text-2xl ${
-                s.selected === i ? "border-amber-300 bg-amber-300/20 ring-2 ring-amber-300/50" : "border-white/10 bg-white/5 hover:bg-white/10"
-              }`}
-            >
-              <span className="absolute left-0.5 top-0 text-[7px] text-white/40 sm:text-[9px]">{(i + 1) % 10}</span>
-              {slot && <ItemGlyph id={slot.id} className="text-base sm:text-2xl" />}
-              {slot && slot.count > 1 && <span className="absolute bottom-0 right-0.5 text-[9px] font-bold text-white sm:text-[10px]">{slot.count}</span>}
-            </button>
-          ))}
+            {s.inventory.slice(0, 10).map((slot, i) => {
+              const tip = slot ? (() => {
+                const it = ITEMS[slot.id];
+                let parts = [tItem(slot.id)];
+                if (it?.dmg) parts.push(`⚔${it.dmg}`);
+                if (it?.power) parts.push(`⛏${it.power}`);
+                if (it?.tier !== undefined) parts.push(`T${it.tier}`);
+                const desc = tItemDesc(slot.id);
+                if (desc) parts.push(`— ${desc}`);
+                return parts.join(" ");
+              })() : "";
+              return (
+              <button
+                key={i}
+                title={tip}
+                onClick={() => onSelectSlot(i)}
+                className={`pointer-events-auto relative flex h-9 w-[10%] items-center justify-center rounded-lg border text-base transition-all sm:h-14 sm:text-2xl ${
+                  s.selected === i ? "border-amber-300 bg-amber-300/20 ring-2 ring-amber-300/50" : "border-white/10 bg-white/5 hover:bg-white/10"
+                }`}
+              >
+                <span className="absolute left-0.5 top-0 text-[7px] text-white/40 sm:text-[9px]">{(i + 1) % 10}</span>
+                {slot && <ItemGlyph id={slot.id} className="text-base sm:text-2xl" />}
+                {slot && slot.count > 1 && <span className="absolute bottom-0 right-0.5 text-[9px] font-bold text-white sm:text-[10px]">{slot.count}</span>}
+              </button>);
+            })}
         </div>
       </div>
     </div>
@@ -672,6 +768,13 @@ export default function App() {
   const [musicOn, setMusicOn] = useState<boolean>(() => ls.get("terralite_music", "1") !== "0");
   const [sfxOn, setSfxOn] = useState<boolean>(() => ls.get("terralite_sfx", "1") !== "0");
   const engineRef = useRef<Engine | null>(null);
+  const [shakeX, setShakeX] = useState(0);
+  const [shakeY, setShakeY] = useState(0);
+  const [howtoOpen, setHowtoOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const prevHpRef = useRef(0);
+  const prevSaveRef = useRef(0);
+  const shakeTimeoutRef = useRef(0);
 
   // unlock audio
   useEffect(() => {
@@ -700,7 +803,25 @@ export default function App() {
     engineRef.current?.setPaused(pauseOpen);
   }, [invOpen, pauseOpen, cheatOpen]);
 
-  const onState = useCallback((s: EngineState) => setState(s), []);
+  const onState = useCallback((s: EngineState) => {
+    if (prevHpRef.current > 0 && s.hp < prevHpRef.current) {
+      const intensity = Math.min(8, (prevHpRef.current - s.hp) * 0.5);
+      window.clearTimeout(shakeTimeoutRef.current);
+      setShakeX((Math.random() - 0.5) * intensity * 2);
+      setShakeY((Math.random() - 0.5) * intensity * 2);
+      shakeTimeoutRef.current = window.setTimeout(() => {
+        setShakeX(0);
+        setShakeY(0);
+      }, 150);
+    }
+    prevHpRef.current = s.hp;
+    if (s.savedAt !== prevSaveRef.current) {
+      prevSaveRef.current = s.savedAt;
+      setSaving(true);
+      setTimeout(() => setSaving(false), 1000);
+    }
+    setState(s);
+  }, []);
   const onGameOver = useCallback(() => {
     setEnded("over");
     const day = state?.dayCount ?? 1;
@@ -820,12 +941,33 @@ export default function App() {
       <MobileGate onPlay={beginGame} />
       {playing && (
         <div className="absolute inset-0">
-          <Stage runId={runId} mode={startMode} engineRef={engineRef} onState={onState} onGameOver={onGameOver} onVictory={onVictory} />
+          {/* Shake container — only the game viewport shakes */}
+          <div
+            className="absolute inset-0"
+            style={{ transform: `translate(${shakeX.toFixed(1)}px, ${shakeY.toFixed(1)}px)` }}
+          >
+            <Stage runId={runId} mode={startMode} engineRef={engineRef} onState={onState} onGameOver={onGameOver} onVictory={onVictory} />
+          </div>
           {state && !ended && <Hud s={state} onSelectSlot={selectSlot} onToggleInv={() => setInvOpen(true)} onPause={() => setPauseOpen(true)} />}
+          {state && !ended && !invOpen && !pauseOpen && (
+            <div className="absolute bottom-28 left-3 z-10 rounded-lg border border-white/10 bg-black/60 p-1 backdrop-blur-sm">
+              <Minimap engineRef={engineRef} state={state} />
+            </div>
+          )}
           {isTouch && state && !ended && !invOpen && !pauseOpen && (
             <TouchControls
               engineRef={engineRef}
             />
+          )}
+          {state && !ended && state.nearPortal && !invOpen && !pauseOpen && (
+            <div className="absolute left-1/2 top-[12%] z-10 -translate-x-1/2 animate-pulse rounded-xl border border-purple-400/40 bg-purple-900/60 px-5 py-2 text-sm font-semibold text-purple-100 shadow-lg backdrop-blur-sm">
+              {t("near_portal")}
+            </div>
+          )}
+          {saving && (
+            <div className="absolute right-4 top-12 z-10 rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-xs text-white/80 backdrop-blur-sm">
+              💾 {t("saving")}
+            </div>
           )}
           {state && invOpen && !ended && (
             <InventoryPanel
@@ -846,10 +988,16 @@ export default function App() {
                   <Btn variant="primary" onClick={() => setPauseOpen(false)}>
                     {t("resume")}
                   </Btn>
-                  <Btn variant="ghost" onClick={retry}>
+                  <Btn variant="ghost" onClick={() => { engineRef.current?.saveGameNow(); toMenu(); }}>
+                    💾 {t("save_quit")}
+                  </Btn>
+                  <Btn variant="ghost" onClick={() => { setPauseOpen(false); setHowtoOpen(true); }}>
+                    ❓ {t("controls_btn")}
+                  </Btn>
+                  <Btn variant="danger" onClick={retry}>
                     {t("restart_world")}
                   </Btn>
-                  <Btn variant="danger" onClick={toMenu}>
+                  <Btn variant="ghost" onClick={toMenu}>
                     {t("quit_menu")}
                   </Btn>
                 </div>
@@ -876,6 +1024,13 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+          {howtoOpen && (
+            <div className="anim-fade absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-md">
+              <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-[#070a12] p-6 shadow-2xl">
+                <HowToScreen onBack={() => setHowtoOpen(false)} />
               </div>
             </div>
           )}

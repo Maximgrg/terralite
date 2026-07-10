@@ -19,6 +19,8 @@ export const GLASS = 14;
 export const BEDROCK = 15;
 export const WORKBENCH = 16;
 export const FURNACE = 17;
+export const PORTAL = 21;
+export const WATER = 18;
 
 export const TILE = 32; // 16px pixel-art source * 2 = crisp retro scaling
 export const WORLD_W = 480;
@@ -58,6 +60,8 @@ TILES[GLASS] = { name: "Glass", solid: true, color: "#bfe6ef", shade: "#7fb6c4",
 TILES[BEDROCK] = { name: "Bedrock", solid: true, color: "#2a2733", shade: "#17151c", minTier: 99, hp: 9999 };
 TILES[WORKBENCH] = { name: "Workbench", solid: true, color: "#9a6a3a", shade: "#634222", minTier: 0, hp: 6, drop: "workbench" };
 TILES[FURNACE] = { name: "Furnace", solid: true, color: "#5a5560", shade: "#342f3a", light: 5, minTier: 0, hp: 8, drop: "furnace" };
+TILES[PORTAL] = { name: "Portal", solid: false, color: "#9b59b6", shade: "#6c3483", light: 8, minTier: 99, hp: 9999 };
+TILES[WATER] = { name: "Water", solid: false, color: "#3366cc", shade: "#1a3d8a", minTier: 99, hp: 9999 };
 
 function TilesGold(id: number, name: string, drop: string, speckle: string, hp: number, tier: number) {
   TILES[id] = { name, solid: true, color: "#8a8f9c", shade: "#5c606c", minTier: tier, hp, drop, speckle };
@@ -102,6 +106,7 @@ export const ITEMS: Record<string, ItemDef> = {
   gold_bar: { name: "Gold Bar", max: 99, kind: "material", color: "#ffd23b", icon: "🥇" },
   workbench: { name: "Workbench", place: WORKBENCH, max: 99, kind: "material", color: "#9a6a3a", icon: "🛠️", desc: "Crafting station" },
   furnace: { name: "Furnace", place: FURNACE, max: 99, kind: "material", color: "#5a5560", icon: "🏭", desc: "Smelts ores into bars" },
+  rotten_flesh: { name: "Rotten Flesh", max: 99, kind: "material", color: "#6fae5a", icon: "🍖", desc: "Eat to heal 5 HP" },
   // tools
   wood_pickaxe: { name: "Wooden Pickaxe", kind: "tool", tool: "pickaxe", tier: 1, power: 2, dmg: 4, color: "#b07a43", icon: "⛏️", desc: "Mines stone, coal & copper" },
   stone_pickaxe: { name: "Stone Pickaxe", kind: "tool", tool: "pickaxe", tier: 2, power: 4, dmg: 6, color: "#8a8f9c", icon: "⛏️", desc: "Mines iron & gold" },
@@ -174,7 +179,23 @@ function hash(x: number, y: number): number {
   return ((n ^ (n >> 16)) >>> 0) / 4294967295;
 }
 
-export function generateWorld(): World {
+function mulberry32(seed: number): () => number {
+  let s = seed | 0;
+  return function() {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function generateWorld(seed?: number): World {
+  const useSeeded = seed !== undefined;
+  const seededRng = useSeeded ? mulberry32(seed!) : null;
+  function rand(): number {
+    return seededRng ? seededRng() : Math.random();
+  }
+
   const w: World = { w: WORLD_W, h: WORLD_H, tiles: new Uint8Array(WORLD_W * WORLD_H), surfaceY: new Int16Array(WORLD_W), spawnX: 0, spawnY: 0 };
   const baseY = 58;
 
@@ -205,17 +226,16 @@ export function generateWorld(): World {
   // carve caves with worms
   const worms = 26;
   for (let i = 0; i < worms; i++) {
-    const sx = Math.floor(Math.random() * w.w);
-    const sy = Math.floor(w.surfaceY[sx] + 14 + Math.random() * (w.h - w.surfaceY[sx] - 26));
+    const sx = Math.floor(rand() * w.w);
+    const sy = Math.floor(w.surfaceY[sx] + 14 + rand() * (w.h - w.surfaceY[sx] - 26));
     let x = sx;
     let y = sy;
-    let ang = Math.random() * Math.PI * 2;
-    const steps = 40 + Math.floor(Math.random() * 120);
-    const rad = 2 + Math.random() * 3;
+    let ang = rand() * Math.PI * 2;
+    const steps = 40 + Math.floor(rand() * 120);
+    const rad = 2 + rand() * 3;
     for (let s = 0; s < steps; s++) {
-      ang += (Math.random() - 0.5) * 0.6;
-      // bias upward sometimes
-      if (Math.random() < 0.08) ang = -Math.PI / 2 + (Math.random() - 0.5);
+      ang += (rand() - 0.5) * 0.6;
+      if (rand() < 0.08) ang = -Math.PI / 2 + (rand() - 0.5);
       x += Math.cos(ang) * 1.4;
       y += Math.sin(ang) * 1.4;
       const xi = Math.floor(x);
@@ -248,8 +268,8 @@ export function generateWorld(): World {
         if (w.tiles[y * w.w + x] !== STONE) continue;
         const depth = y - w.surfaceY[x];
         if (depth < ore.minD) continue;
-        if (Math.random() < ore.rarity) {
-          placeVein(w, x, y, ore.id, ore.size);
+        if (rand() < ore.rarity) {
+          placeVein(w, x, y, ore.id, ore.size, rand);
         }
       }
     }
@@ -268,8 +288,8 @@ export function generateWorld(): World {
   // trees on grass
   for (let x = 4; x < w.w - 4; x++) {
     const sy = w.surfaceY[x];
-    if (w.tiles[sy * w.w + x] === GRASS && Math.random() < 0.16) {
-      const th = 4 + Math.floor(Math.random() * 4);
+    if (w.tiles[sy * w.w + x] === GRASS && rand() < 0.16) {
+      const th = 4 + Math.floor(rand() * 4);
       for (let i = 1; i <= th; i++) {
         const ty = sy - i;
         if (ty >= 0) w.tiles[ty * w.w + x] = WOOD;
@@ -287,19 +307,29 @@ export function generateWorld(): World {
     }
   }
 
+  // portals on surface
+  const portalCount = 2 + Math.floor(rand() * 2);
+  for (let p = 0; p < portalCount; p++) {
+    const px = 40 + Math.floor(rand() * (w.w - 80));
+    const sy = w.surfaceY[px];
+    if (sy >= 0 && sy < w.h) {
+      w.tiles[sy * w.w + px] = PORTAL;
+    }
+  }
+
   w.spawnX = Math.floor(w.w / 2);
   w.spawnY = w.surfaceY[w.spawnX] - 4;
   return w;
 }
 
-function placeVein(w: World, x: number, y: number, id: number, size: number) {
+function placeVein(w: World, x: number, y: number, id: number, size: number, rand: () => number) {
   let cx = x;
   let cy = y;
   for (let i = 0; i < size; i++) {
     if (cx >= 0 && cx < w.w && cy >= 0 && cy < w.h && w.tiles[cy * w.w + cx] === STONE) {
       w.tiles[cy * w.w + cx] = id;
     }
-    cx += Math.floor(Math.random() * 3) - 1;
-    cy += Math.floor(Math.random() * 3) - 1;
+    cx += Math.floor(rand() * 3) - 1;
+    cy += Math.floor(rand() * 3) - 1;
   }
 }
