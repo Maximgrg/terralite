@@ -18,7 +18,8 @@ const MOVE_SPEED = 175;
 const DAY_LEN = 120; // seconds full cycle
 const HOTBAR = 10;
 const INV_SIZE = 30;
-const SAVE_KEY = "terralite_save_v1";
+const SAVE_KEY_PREFIX = "terralite_save_v1_";
+const WORLD_LIST_KEY = "terralite_worlds";
 
 function u8ToB64(arr: Uint8Array): string {
   let s = "";
@@ -215,7 +216,8 @@ export class Engine {
     this.cb = cb;
   }
 
-  start(mode: "new" | "auto" = "auto") {
+  start(mode: "new" | "auto" = "auto", worldId?: number) {
+    if (worldId !== undefined) this.currentWorldId = worldId;
     if (mode === "new") this.clearSave();
     const loaded = mode === "auto" ? this.loadGame() : null;
     if (loaded) {
@@ -384,13 +386,126 @@ export class Engine {
     this.saveGame();
   }
 
-  // ---------- save / load ----------
+  private saveKey(): string { return SAVE_KEY_PREFIX + this.currentWorldId; }
+
+  // ---------- multi-world management ----------
+  static getWorldList(): number[] {
+    try {
+      const raw = localStorage.getItem(WORLD_LIST_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    // migrate old single save
+    try {
+      const old = localStorage.getItem("terralite_save_v1");
+      if (old) {
+        const list = [0];
+        localStorage.setItem(WORLD_LIST_KEY, JSON.stringify(list));
+        // rename old save to new key
+        localStorage.setItem(SAVE_KEY_PREFIX + "0", old);
+        localStorage.removeItem("terralite_save_v1");
+        return list;
+      }
+    } catch { /* ignore */ }
+    return [0];
+  }
+
+  static saveWorldList(list: number[]) {
+    try {
+      localStorage.setItem(WORLD_LIST_KEY, JSON.stringify(list));
+    } catch { /* ignore */ }
+  }
+
+  static createNewWorld(): number {
+    const list = Engine.getWorldList();
+    const nextId = list.length > 0 ? Math.max(...list) + 1 : 0;
+    list.push(nextId);
+    Engine.saveWorldList(list);
+    return nextId;
+  }
+
+  static deleteWorld(id: number) {
+    let list = Engine.getWorldList();
+    list = list.filter((wid) => wid !== id);
+    Engine.saveWorldList(list);
+    try {
+      localStorage.removeItem(SAVE_KEY_PREFIX + id);
+    } catch { /* ignore */ }
+  }
+
   static hasSave(): boolean {
     try {
-      return localStorage.getItem(SAVE_KEY) !== null;
+      const list = Engine.getWorldList();
+      return list.length > 0 && list.some((id) => {
+        try { return localStorage.getItem(SAVE_KEY_PREFIX + id) !== null; }
+        catch { return false; }
+      });
     } catch {
       return false;
     }
+  }
+
+  static hasSaveForWorld(id: number): boolean {
+    try {
+      return localStorage.getItem(SAVE_KEY_PREFIX + id) !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Start with a specific world (loads or creates). */
+  startWithWorld(worldId: number) {
+    this.currentWorldId = worldId;
+    const loaded = this.loadGame();
+    if (loaded) {
+      this.applySave(loaded);
+      if (this.currentWorldId > 0) {
+        this.world = generateWorld(this.currentWorldId);
+        const sx = this.world.spawnX;
+        const surf = this.world.surfaceY[sx];
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dy = 5; dy >= 1; dy--) {
+            const t = getTile(this.world, sx + dx, surf - dy);
+            if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
+          }
+        }
+        this.px = this.world.spawnX * TILE;
+        this.py = this.world.spawnY * TILE;
+      }
+    } else {
+      this.world = generateWorld(worldId);
+      this.resetProgress();
+      this.currentWorldId = worldId;
+      const sx = this.world.spawnX;
+      const surf = this.world.surfaceY[sx];
+      for (let dx = -2; dx <= 2; dx++) {
+        for (let dy = 5; dy >= 1; dy--) {
+          const t = getTile(this.world, sx + dx, surf - dy);
+          if (t === WOOD || t === LEAVES) setTile(this.world, sx + dx, surf - dy, AIR);
+        }
+      }
+      this.px = this.world.spawnX * TILE;
+      this.py = this.world.spawnY * TILE;
+    }
+    this.camX = this.px - 400;
+    this.camY = this.py - 300;
+    this.attach();
+    this.resize();
+    this.buildGlowSprite();
+    initSprites();
+    const im = new Image();
+    im.onload = () => {
+      const cv = document.createElement("canvas");
+      cv.width = im.naturalWidth || im.width;
+      cv.height = im.naturalHeight || im.height;
+      cv.getContext("2d")!.drawImage(im, 0, 0);
+      this.skyImg = cv;
+    };
+    im.src = skyUrl;
+    audio.setTrack("day");
+    this.running = true;
+    this.last = performance.now();
+    this.showBanner(loaded ? "Welcome back" : QUESTS[0].title, loaded ? `Day ${this.dayCount} · auto-saved` : "Welcome, survivor");
+    this.raf = requestAnimationFrame((t) => this.loop(t));
   }
 
   /** Resume free-play in the current world after the victory cinematic ends. */
@@ -457,7 +572,7 @@ export class Engine {
         ironMined: this.ironMined,
         currentWorldId: this.currentWorldId,
       };
-      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+      localStorage.setItem(this.saveKey(), JSON.stringify(data));
     } catch {
       /* storage full / unavailable — ignore */
     }
@@ -465,7 +580,7 @@ export class Engine {
 
   private loadGame(): any | null {
     try {
-      const raw = localStorage.getItem(SAVE_KEY);
+      const raw = localStorage.getItem(this.saveKey());
       if (!raw) return null;
       const d = JSON.parse(raw);
       if (!d || !d.tiles || !d.surfaceY) return null;
@@ -508,7 +623,7 @@ export class Engine {
 
   private clearSave() {
     try {
-      localStorage.removeItem(SAVE_KEY);
+      localStorage.removeItem(this.saveKey());
     } catch {
       /* ignore */
     }

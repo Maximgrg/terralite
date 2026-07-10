@@ -39,7 +39,7 @@ function scrollToId(id: string) {
 
 const motes = Array.from({ length: 18 }, () => ({ left: Math.random() * 100, delay: Math.random() * 8, dur: 8 + Math.random() * 10, size: 2 + Math.random() * 4 }));
 
-export default function Landing({ onPlay, onContinue }: { onPlay: () => void; onContinue?: () => void }) {
+export default function Landing({ onPlay, onContinue, onWorlds }: { onPlay: () => void; onContinue?: () => void; onWorlds?: () => void }) {
   useT();
   const [navSolid, setNavSolid] = useState(false);
   const [scrollY, setScrollY] = useState(0);
@@ -148,6 +148,14 @@ export default function Landing({ onPlay, onContinue }: { onPlay: () => void; on
                 </option>
               ))}
             </select>
+            {onWorlds && (
+              <button
+                onClick={onWorlds}
+                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 backdrop-blur transition-colors hover:bg-white/15"
+              >
+                🌍 {t("worlds")}
+              </button>
+            )}
             {hasSave && onContinue && (
               <button
                 onClick={onContinue}

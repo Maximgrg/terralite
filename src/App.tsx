@@ -10,7 +10,7 @@ import EndingSequence from "./EndingSequence";
 import LanguagePicker from "./LanguagePicker";
 import { useT, t, tItem, tItemDesc, tQuest, getLang, setLang, hasChosenLang, LANGS } from "./i18n";
 
-type Screen = "landing" | "title" | "story" | "howto" | "playing";
+type Screen = "landing" | "worlds" | "title" | "story" | "howto" | "playing";
 
 const ls = {
   get: (k: string, d: string) => {
@@ -174,6 +174,7 @@ function Minimap({ engineRef, state }: { engineRef: React.MutableRefObject<Engin
 const Stage = memo(function Stage({
   runId,
   mode,
+  worldId,
   engineRef,
   onState,
   onGameOver,
@@ -181,6 +182,7 @@ const Stage = memo(function Stage({
 }: {
   runId: number;
   mode: "new" | "auto";
+  worldId?: number | null;
   engineRef: React.MutableRefObject<Engine | null>;
   onState: (s: EngineState) => void;
   onGameOver: () => void;
@@ -191,6 +193,8 @@ const Stage = memo(function Stage({
   cb.current = { onState, onGameOver, onVictory };
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  const worldIdRef = useRef(worldId);
+  worldIdRef.current = worldId;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -201,7 +205,11 @@ const Stage = memo(function Stage({
       onVictory: () => cb.current.onVictory(),
     });
     engineRef.current = eng;
-    eng.start(modeRef.current);
+    if (worldIdRef.current !== null && worldIdRef.current !== undefined) {
+      eng.startWithWorld(worldIdRef.current);
+    } else {
+      eng.start(modeRef.current);
+    }
     return () => {
       eng.destroy();
       engineRef.current = null;
@@ -752,6 +760,108 @@ function HowToScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
+// ---------------- World Manager (multi-world) ----------------
+function WorldManager({
+  onPlay,
+  onBack,
+}: {
+  onPlay: (worldId: number) => void;
+  onBack: () => void;
+}) {
+  const [worldIds, setWorldIds] = useState<number[]>(() => Engine.getWorldList());
+  const refresh = () => setWorldIds(Engine.getWorldList());
+
+  const worldInfo = (id: number): { day: number; quest: string; hasData: boolean } => {
+    try {
+      const raw = localStorage.getItem(`terralite_save_v1_${id}`);
+      if (!raw) return { day: 0, quest: "—", hasData: false };
+      const d = JSON.parse(raw);
+      const day = d.dayCount ?? 0;
+      const qi = d.questIndex ?? 0;
+      const quest = qi >= 11 ? "✓" : `Q${qi + 1}`;
+      return { day, quest, hasData: true };
+    } catch {
+      return { day: 0, quest: "—", hasData: false };
+    }
+  };
+
+  const createNew = () => {
+    const id = Engine.createNewWorld();
+    refresh();
+    onPlay(id);
+  };
+
+  const delWorld = (id: number) => {
+    Engine.deleteWorld(id);
+    refresh();
+  };
+
+  return (
+    <div className="anim-fade flex h-full w-full flex-col bg-[#070a12]">
+      {/* header */}
+      <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+        <button onClick={onBack} className="rounded-lg border border-white/15 bg-black/40 px-4 py-2 text-sm text-white/80 hover:bg-white/10">
+          ← {t("main_menu")}
+        </button>
+        <h2 className="text-lg font-bold text-amber-100">🌍 {t("worlds_title")}</h2>
+        <button onClick={createNew} className="rounded-lg bg-gradient-to-r from-emerald-500 to-green-600 px-4 py-2 text-sm font-bold text-white shadow-lg hover:scale-105">
+          ✨ {t("new_world_btn")}
+        </button>
+      </div>
+
+      {/* world list */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {worldIds.length === 0 ? (
+          <div className="mt-20 text-center text-white/40">
+            <div className="text-5xl">🌍</div>
+            <p className="mt-4 text-lg">{t("no_worlds")}</p>
+            <button onClick={createNew} className="mt-4 rounded-xl bg-gradient-to-r from-amber-300 to-orange-400 px-8 py-3 font-bold text-[#1a1205] shadow-lg hover:scale-105">
+              ✨ {t("create_first")}
+            </button>
+          </div>
+        ) : (
+          <div className="mx-auto grid max-w-3xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {worldIds.map((id) => {
+              const info = worldInfo(id);
+              return (
+                <div
+                  key={id}
+                  className="group relative rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5 transition-all hover:border-amber-300/40 hover:shadow-[0_8px_30px_rgba(255,170,70,0.12)]"
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="text-xs uppercase tracking-wider text-amber-200/80">🌍 {t("world")} {id + 1}</span>
+                    <span className="rounded-full bg-black/40 px-2 py-0.5 text-[10px] text-white/50">
+                      {t("day")} {info.day}
+                    </span>
+                  </div>
+                  <div className="mb-4 text-sm text-white/60">
+                    <span className="text-emerald-300">{info.quest}</span>
+                    {!info.hasData && <span className="ml-2 text-white/30">{t("new_world")}</span>}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => onPlay(id)}
+                      className="flex-1 rounded-lg bg-gradient-to-r from-amber-300 to-orange-400 py-2 text-xs font-bold text-[#1a1205] transition-transform hover:scale-105"
+                    >
+                      ▶ {t("play")}
+                    </button>
+                    <button
+                      onClick={() => delWorld(id)}
+                      className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200 hover:bg-rose-500/20"
+                    >
+                      🗑
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------------- App ----------------
 export default function App() {
   useT(); // re-render on language change
@@ -759,6 +869,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("landing");
   const [runId, setRunId] = useState(0);
   const [startMode, setStartMode] = useState<"new" | "auto">("auto");
+  const [playWorldId, setPlayWorldId] = useState<number | null>(null);
   const [state, setState] = useState<EngineState | null>(null);
   const [invOpen, setInvOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
@@ -849,7 +960,19 @@ export default function App() {
     setEnded(null);
     setInvOpen(false);
     setPauseOpen(false);
-    setStartMode("auto"); // продолжить сохранение, иначе новый мир
+    setStartMode("auto");
+    setPlayWorldId(null);
+    setRunId((r) => r + 1);
+    setScreen("playing");
+  };
+  const selectWorld = (id: number) => {
+    click();
+    setState(null);
+    setEnded(null);
+    setInvOpen(false);
+    setPauseOpen(false);
+    setStartMode("auto");
+    setPlayWorldId(id);
     setRunId((r) => r + 1);
     setScreen("playing");
   };
@@ -859,7 +982,8 @@ export default function App() {
     setEnded(null);
     setInvOpen(false);
     setPauseOpen(false);
-    setStartMode("new"); // начать заново (сбросить сохранение)
+    setStartMode("new");
+    setPlayWorldId(null);
     setRunId((r) => r + 1);
     setScreen("playing");
   };
@@ -877,6 +1001,7 @@ export default function App() {
     setEnded(null);
     setInvOpen(false);
     setPauseOpen(false);
+    setPlayWorldId(null);
   };
   const selectSlot = (i: number) => {
     engineRef.current?.selectSlot(i);
@@ -946,7 +1071,7 @@ export default function App() {
             className="absolute inset-0"
             style={{ transform: `translate(${shakeX.toFixed(1)}px, ${shakeY.toFixed(1)}px)` }}
           >
-            <Stage runId={runId} mode={startMode} engineRef={engineRef} onState={onState} onGameOver={onGameOver} onVictory={onVictory} />
+            <Stage runId={runId} mode={startMode} worldId={playWorldId} engineRef={engineRef} onState={onState} onGameOver={onGameOver} onVictory={onVictory} />
           </div>
           {state && !ended && <Hud s={state} onSelectSlot={selectSlot} onToggleInv={() => setInvOpen(true)} onPause={() => setPauseOpen(true)} />}
           {state && !ended && !invOpen && !pauseOpen && (
@@ -1091,7 +1216,15 @@ export default function App() {
             click();
             beginGame();
           }}
+          onWorlds={() => {
+            audio.ensure();
+            click();
+            setScreen("worlds");
+          }}
         />
+      )}
+      {screen === "worlds" && (
+        <WorldManager onPlay={selectWorld} onBack={() => { click(); setScreen("landing"); }} />
       )}
       {screen === "story" && <StoryScreen onBegin={beginGame} onBack={toMenu} />}
       {screen === "howto" && <HowToScreen onBack={() => { click(); setScreen("landing"); }} />}
