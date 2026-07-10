@@ -292,7 +292,7 @@ function Hud({
         <div className="pointer-events-none w-40 rounded-lg border border-emerald-300/20 bg-black/55 p-1.5 backdrop-blur-sm sm:w-56 sm:rounded-xl sm:p-2.5">
           <div className="text-[9px] uppercase tracking-[0.15em] text-emerald-300/80 sm:text-[10px] sm:tracking-[0.2em]">{s.questDone ? t("all_complete") : t("quest")}</div>
           <div className="truncate text-xs font-semibold text-white/90 sm:text-sm">{tQuest(s.questIndex).title}</div>
-          <div className="truncate text-[11px] text-white/60 sm:text-xs">{tQuest(s.questIndex).text}</div>
+          <div className="text-[11px] text-white/60 sm:text-xs leading-tight">{tQuest(s.questIndex).text}</div>
         </div>
       </div>
 
