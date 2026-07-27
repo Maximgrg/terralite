@@ -20,13 +20,11 @@ const PAL = {
   cloud: ["#eef4ff", "#e2ebfa", "#f7fbff", "#d8e3f4", "#eaf1fd"],
   speckle: {
     aetherite: ["#5fd8ff", "#37bde8", "#a8ecff"],
-    sunstone: ["#ffc44a", "#e8a022", "#ffe callback"],
+    sunstone: ["#ffc44a", "#e8a022", "#ffeaa8"],
     stormcore: ["#b06bff", "#8a3ee0", "#dcb4ff"],
     voidshard: ["#ff5fd0", "#d42ba6", "#ffb0ea"],
   } as Record<string, string[]>,
 };
-// (typo guard: keep the sunstone highlight a real colour)
-PAL.speckle.sunstone = ["#ffc44a", "#e8a022", "#ffeaa8"];
 
 function hash(x: number, y: number, s: number): number {
   let n = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(s, 83492791)) | 0;
@@ -79,13 +77,8 @@ function nuggets(c: CanvasRenderingContext2D, speckle: string[], seed: number, g
     if (hash(seed, i, 19) > 0.4) c.fillRect(bx + 1, by, 1, 1);
     if (hash(seed, i, 29) > 0.5) c.fillRect(bx, by + 1, 1, 1);
     if (hash(seed, i, 39) > 0.6) c.fillRect(bx + 1, by + 1, 1, 1);
-    if (glow) {
-      c.fillStyle = "rgba(255,255,255,0.75)";
-      c.fillRect(bx, by, 1, 1);
-    } else {
-      c.fillStyle = "rgba(255,255,255,0.5)";
-      c.fillRect(bx, by, 1, 1);
-    }
+    c.fillStyle = glow ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.5)";
+    c.fillRect(bx, by, 1, 1);
   }
 }
 
@@ -222,7 +215,6 @@ function build(id: number, variant: number): HTMLCanvasElement {
       c.fillStyle = "rgba(255,255,255,0.75)";
       c.fillRect(4, 4, 2, 2);
       c.fillRect(10, 9, 2, 2);
-      c.fillStyle = "rgba(130,90,20,0.35)";
       c.strokeStyle = "rgba(130,90,20,0.45)";
       c.strokeRect(0.5, 0.5, TEX - 1, TEX - 1);
       break;
@@ -281,16 +273,16 @@ export function skyTileTexture(id: number, variant: number): HTMLCanvasElement {
 
 // ---- background walls seen through hollowed-out island interiors ----
 const wallCache = new Map<number, HTMLCanvasElement>();
+function dim(hex: string, f: number): string {
+  const h = hex.replace("#", "");
+  const r = Math.round(parseInt(h.substring(0, 2), 16) * f);
+  const g = Math.round(parseInt(h.substring(2, 4), 16) * f);
+  const b = Math.round(parseInt(h.substring(4, 6), 16) * f);
+  return `rgb(${r},${g},${b})`;
+}
 function buildWall(kind: "sky" | "void", variant: number): HTMLCanvasElement {
   const { cv, c } = newCanvas();
   const seed = (kind === "sky" ? 2200 : 2700) + variant * 17;
-  const dim = (hex: string, f: number) => {
-    const h = hex.replace("#", "");
-    const r = Math.round(parseInt(h.substring(0, 2), 16) * f);
-    const g = Math.round(parseInt(h.substring(2, 4), 16) * f);
-    const b = Math.round(parseInt(h.substring(4, 6), 16) * f);
-    return `rgb(${r},${g},${b})`;
-  };
   if (kind === "sky") {
     noiseFill(c, PAL.stone.map((p) => dim(p, 0.5)), seed);
     cracks(c, seed, "rgba(30,40,60,0.5)");
