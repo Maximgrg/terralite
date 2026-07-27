@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { audio } from "./audio";
 import sandboxBg from "./assets/sandbox-bg.jpg";
 import { t } from "./i18n";
+import { tc } from "./sky/skyI18n";
+import { SkyEngine } from "./sky/skyEngine";
 
 const sparks = Array.from({ length: 26 }, () => ({
   left: Math.random() * 100,
@@ -16,14 +18,18 @@ export default function EndingSequence({
   onContinueWorld,
   onNewWorld,
   onMenu,
+  onChapter2,
 }: {
   onContinueWorld: () => void;
   onNewWorld: () => void;
   onMenu: () => void;
+  onChapter2?: () => void;
 }) {
   const [stage, setStage] = useState<Stage>("scene1");
 
   useEffect(() => {
+    // beating the King is what opens the sky
+    SkyEngine.unlock();
     audio.setTrack("menu");
     const t1 = setTimeout(() => setStage("scene2"), 5200);
     const t2 = setTimeout(() => setStage("scene3"), 10500);
@@ -91,7 +97,23 @@ export default function EndingSequence({
             <div className="mx-auto mt-8 h-px w-24 bg-gradient-to-r from-transparent via-amber-300/60 to-transparent" />
             <p className="mt-4 text-sm text-white/50">{t("thanks")}</p>
 
-            <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            {/* CHAPTER II — the sky is open now */}
+            {onChapter2 && (
+              <div className="mx-auto mt-8 max-w-md rounded-2xl border border-cyan-300/25 bg-gradient-to-b from-cyan-400/10 to-violet-500/5 p-5 backdrop-blur">
+                <div className="text-[10px] uppercase tracking-[0.4em] text-cyan-300/80">{tc("ch2_name")}</div>
+                <div className="title-gradient mt-1 text-2xl font-black sm:text-3xl">{tc("ch2_title")}</div>
+                <p className="mt-2 text-sm text-white/65">{tc("ch2_tagline")}</p>
+                <button
+                  onClick={onChapter2}
+                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-sky-300 via-cyan-300 to-violet-400 px-7 py-3.5 text-base font-bold text-[#08111f] shadow-[0_0_30px_rgba(120,200,255,0.5)] transition-transform hover:scale-105"
+                >
+                  ▶ {tc("ch2_start")}
+                </button>
+                <div className="mt-2 text-[11px] text-white/40">{tc("ch2_from_menu")}</div>
+              </div>
+            )}
+
+            <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <button
                 onClick={onContinueWorld}
                 className="rounded-xl bg-gradient-to-r from-amber-300 via-orange-400 to-amber-500 px-7 py-3.5 text-base font-bold text-[#1a1205] shadow-[0_0_30px_rgba(255,170,70,0.5)] transition-transform hover:scale-105"
