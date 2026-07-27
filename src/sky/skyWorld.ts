@@ -117,8 +117,8 @@ Object.assign(ITEMS, {
 
 // ---------------------------------------------------------------- armor
 export type ArmorSlot = "head" | "chest" | "legs";
-export interface ArmorDef { slot: ArmorSlot; defense: number; set: ArmorSet; }
 export type ArmorSet = "cloud" | "sunsteel" | "storm" | "void";
+export interface ArmorDef { slot: ArmorSlot; defense: number; set: ArmorSet; }
 
 export const ARMOR: Record<string, ArmorDef> = {
   cloud_helm: { slot: "head", defense: 2, set: "cloud" },
@@ -161,7 +161,9 @@ export interface SkyRecipe {
 }
 
 export const SKY_RECIPES: SkyRecipe[] = [
-  // basics
+  // basics — these exist so the sky can never soft-lock you out of crafting
+  { id: "sky_workbench", out: "workbench", outCount: 1, station: "none", ing: [{ id: "sky_wood", n: 10 }] },
+  { id: "sky_furnace", out: "furnace", outCount: 1, station: "workbench", ing: [{ id: "sky_stone", n: 20 }, { id: "glow_dust", n: 2 }] },
   { id: "sky_plank", out: "sky_plank", outCount: 2, station: "workbench", ing: [{ id: "sky_wood", n: 1 }] },
   { id: "sky_torch", out: "torch", outCount: 4, station: "none", ing: [{ id: "sky_wood", n: 1 }, { id: "glow_dust", n: 1 }] },
   { id: "sky_glass", out: "sky_glass", outCount: 2, station: "furnace", ing: [{ id: "cloud", n: 2 }] },
@@ -243,7 +245,7 @@ function mulberry32(seed: number): () => number {
 interface Island { cx: number; cy: number; rx: number; ry: number; band: number; }
 
 export interface SkyWorld extends World {
-  /** Row of the Storm Altar (boss arena) so the HUD can point at it. */
+  /** Position of the Storm Altar (boss arena) so the HUD can point at it. */
   altarX: number;
   altarY: number;
 }
@@ -292,10 +294,8 @@ function hollowCaves(w: World, isl: Island, rand: () => number) {
     for (let dy = -Math.ceil(r); dy <= Math.ceil(r); dy++) {
       for (let dx = -Math.ceil(r); dx <= Math.ceil(r); dx++) {
         if (dx * dx + dy * dy > r * r) continue;
-        const tx = px + dx;
-        const ty = py + dy;
-        const cur = at(w, tx, ty);
-        if (cur === SKY_STONE || cur === VOID_STONE) put(w, tx, ty, AIR);
+        const cur = at(w, px + dx, py + dy);
+        if (cur === SKY_STONE || cur === VOID_STONE) put(w, px + dx, py + dy, AIR);
       }
     }
   }
