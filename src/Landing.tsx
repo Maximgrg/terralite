@@ -3,7 +3,9 @@ import sandboxBg from "./assets/sandbox-bg.jpg";
 import skyBg from "./assets/bg_sky.jpg";
 import atlasBg from "./assets/char_atlas.jpg";
 import { useT, t, LANGS, getLang, setLang } from "./i18n";
+import { tc } from "./sky/skyI18n";
 import { Engine } from "./engine";
+import { SkyEngine } from "./sky/skyEngine";
 
 /* scroll-reveal wrapper */
 function Reveal({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
@@ -35,6 +37,20 @@ function Reveal({ children, delay = 0, className = "" }: { children: React.React
 
 function scrollToId(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/** Chapter II opens once the Slime King is down (or a sky save already exists). */
+function chapter2Unlocked(): boolean {
+  if (SkyEngine.isUnlocked() || SkyEngine.hasSave()) return true;
+  try {
+    for (const w of Engine.getWorldList()) {
+      const raw = localStorage.getItem(`terralite_save_v1_${w.id}`);
+      if (!raw) continue;
+      const d = JSON.parse(raw);
+      if (d.victory || d.kingDefeated || (d.questIndex ?? 0) >= 11) return true;
+    }
+  } catch { /* ignore */ }
+  return false;
 }
 
 const motes = Array.from({ length: 18 }, () => ({ left: Math.random() * 100, delay: Math.random() * 8, dur: 8 + Math.random() * 10, size: 2 + Math.random() * 4 }));
@@ -176,7 +192,62 @@ function WorldPicker({
   );
 }
 
-export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay: () => void; onContinue?: () => void; onSelectWorld?: (id: number) => void }) {
+/** The Sky Islands entry point, always visible on the menu once unlocked. */
+function Chapter2Card({ onChapter2 }: { onChapter2: (mode: "new" | "continue") => void }) {
+  const unlocked = chapter2Unlocked();
+  const hasSave = SkyEngine.hasSave();
+  return (
+    <div
+      id="chapter2"
+      className={`mx-auto mt-6 max-w-xl rounded-2xl border p-5 backdrop-blur-md transition-all ${
+        unlocked
+          ? "border-cyan-300/30 bg-gradient-to-br from-cyan-400/12 via-sky-500/8 to-violet-500/10 shadow-[0_0_40px_rgba(110,190,255,0.18)]"
+          : "border-white/10 bg-black/40 opacity-70"
+      }`}
+    >
+      <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.4em] text-cyan-300/80">
+        <span>☁️</span>
+        <span>{tc("ch2_name")}</span>
+      </div>
+      <div className="title-gradient mt-1 text-3xl font-black sm:text-4xl">{tc("ch2_title")}</div>
+      <p className="mx-auto mt-2 max-w-md text-sm text-white/70">{tc("ch2_tagline")}</p>
+
+      {unlocked ? (
+        <div className="mt-4 flex flex-col items-center justify-center gap-2 sm:flex-row">
+          {hasSave && (
+            <button
+              onClick={() => onChapter2("continue")}
+              className="w-full rounded-xl bg-gradient-to-r from-cyan-300 to-sky-400 px-6 py-3 text-sm font-bold text-[#08111f] shadow-[0_0_24px_rgba(110,200,255,0.45)] transition-transform hover:scale-105 sm:w-auto"
+            >
+              ▶ {tc("ch2_continue")}
+            </button>
+          )}
+          <button
+            onClick={() => onChapter2("new")}
+            className={`w-full rounded-xl px-6 py-3 text-sm font-bold transition-transform hover:scale-105 sm:w-auto ${
+              hasSave
+                ? "border border-white/25 bg-white/5 text-white/85 hover:bg-white/12"
+                : "bg-gradient-to-r from-sky-300 via-cyan-300 to-violet-400 text-[#08111f] shadow-[0_0_24px_rgba(120,200,255,0.5)]"
+            }`}
+          >
+            {hasSave ? `↻ ${tc("ch2_restart")}` : `▶ ${tc("ch2_start")}`}
+          </button>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-xs text-white/50">
+          🔒 {tc("ch2_locked")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Landing({ onPlay, onContinue, onSelectWorld, onChapter2 }: {
+  onPlay: () => void;
+  onContinue?: () => void;
+  onSelectWorld?: (id: number) => void;
+  onChapter2?: (mode: "new" | "continue") => void;
+}) {
   useT();
   const [navSolid, setNavSolid] = useState(false);
   const [scrollY, setScrollY] = useState(0);
@@ -234,10 +305,10 @@ export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay:
     { icon: "👑", title: t("f6t"), text: t("f6d"), color: "from-yellow-500/20 to-amber-500/5" },
   ];
   const STATS = [
-    { v: "11", l: t("stat_quests") },
-    { v: "17+", l: t("stat_blocks") },
+    { v: "22", l: t("stat_quests") },
+    { v: "33+", l: t("stat_blocks") },
     { v: "∞", l: t("stat_worlds") },
-    { v: "1", l: t("stat_boss") },
+    { v: "4", l: t("stat_boss") },
   ];
   const CONTROLS = [
     { k: "WASD / ←→", d: t("c_move") },
@@ -271,6 +342,11 @@ export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay:
                 {n.label}
               </button>
             ))}
+            {onChapter2 && (
+              <button onClick={() => scrollToId("chapter2")} className="text-sm font-semibold text-cyan-200/80 transition-colors hover:text-cyan-100">
+                ☁️ {tc("ch2_name")}
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -345,6 +421,9 @@ export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay:
             </button>
           </div>
 
+          {/* ===== CHAPTER II ===== */}
+          {onChapter2 && <Chapter2Card onChapter2={onChapter2} />}
+
           {/* ===== INLINE WORLD PICKER ===== */}
           <div className="mt-8">
             {!showWorlds ? (
@@ -399,6 +478,19 @@ export default function Landing({ onPlay, onContinue, onSelectWorld }: { onPlay:
               <p className="text-amber-200/90">{t("story3")}</p>
             </div>
           </Reveal>
+          {onChapter2 && chapter2Unlocked() && (
+            <Reveal delay={200}>
+              <div className="mt-10 rounded-2xl border border-cyan-300/20 bg-cyan-400/5 p-6 text-left">
+                <div className="text-xs uppercase tracking-[0.4em] text-cyan-300/80">{tc("ch2_name")} · {tc("ch2_title")}</div>
+                <div className="mt-4 space-y-4 text-base leading-relaxed text-white/75 sm:text-lg">
+                  <p>{tc("ch2_p1")}</p>
+                  <p>{tc("ch2_p2")}</p>
+                  <p>{tc("ch2_p3")}</p>
+                  <p className="text-cyan-200/90">{tc("ch2_p4")}</p>
+                </div>
+              </div>
+            </Reveal>
+          )}
         </div>
       </section>
 
