@@ -8,6 +8,7 @@ import MobileGate, { goFullscreen } from "./MobileGate";
 import CheatMenu from "./CheatMenu";
 import EndingSequence from "./EndingSequence";
 import LanguagePicker from "./LanguagePicker";
+import Chapter2 from "./sky/Chapter2";
 import { useT, t, tItem, tItemDesc, tQuest, getLang, setLang, hasChosenLang, LANGS } from "./i18n";
 
 type Screen = "landing" | "title" | "story" | "howto" | "playing";
@@ -372,14 +373,10 @@ function TouchBtn({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    // PURE touch handling, tracked per-finger (touchIdentifier). No pointer or
-    // mouse events: mobile browsers synthesize mouse events ~300ms after touch,
-    // which were racing with touchend and resetting movement. preventDefault on
-    // a non-passive listener also suppresses that synthesis and the 300ms delay.
     let myTouch: number | null = null;
     const td = (e: TouchEvent) => {
       e.preventDefault();
-      if (myTouch !== null) return; // already pressed by another finger
+      if (myTouch !== null) return;
       myTouch = e.changedTouches[0].identifier;
       downRef.current();
     };
@@ -389,7 +386,6 @@ function TouchBtn({
       upRef.current();
     };
     const tu = (e: TouchEvent) => {
-      // only release when OUR finger lifts
       for (let i = 0; i < e.changedTouches.length; i++) {
         if (e.changedTouches[i].identifier === myTouch) {
           e.preventDefault();
@@ -458,7 +454,7 @@ function TouchControls({
           bottom: "calc(18px + env(safe-area-inset-bottom))",
         }}
       >
-        <TouchBtn onDown={togglePlace} onUp={noop} className={`${btn} h-14 w-14 text-xl ${placeMode ? "border-amber-300 bg-amber-400/40" : "text-white/70"}`} title="Режим строительства">
+        <TouchBtn onDown={togglePlace} onUp={noop} className={`${btn} h-14 w-14 text-xl ${placeMode ? "border-amber-300 bg-amber-400/40" : "text-white/70"}`} title={t("build_label")}>
           🧱
         </TouchBtn>
         <TouchBtn onDown={() => engineRef.current?.jumpNow()} onUp={noop} className={`${btn} h-[4.5rem] w-[4.5rem] text-3xl text-white`}>
@@ -467,7 +463,7 @@ function TouchControls({
       </div>
       {placeMode && (
         <div className="pointer-events-none absolute bottom-28 right-6 rounded-full bg-amber-400/20 px-3 py-1 text-[10px] text-amber-100">
-          Режим строительства: тапни, куда поставить блок
+          {t("build_mode_hint")}
         </div>
       )}
     </div>
@@ -503,7 +499,7 @@ function InventoryPanel({
               <span className={s.stations.workbench ? "text-emerald-300" : "text-white/30"}>🛠️ {t("workbench")} {s.stations.workbench ? "✓" : "✗"}</span>
               <span className={s.stations.furnace ? "text-emerald-300" : "text-white/30"}>🏭 {t("furnace")} {s.stations.furnace ? "✓" : "✗"}</span>
             <button onClick={onClose} className="rounded-md bg-white/10 px-3 py-1 text-white hover:bg-white/20">
-              Close ✕
+              {t("close")} ✕
             </button>
           </div>
         </div>
@@ -581,14 +577,14 @@ function InventoryPanel({
                   </div>
                 </div>
               ) : (
-                <div className="text-xs text-white/40">Hotbar slot {s.selected + 1} is empty.</div>
+                <div className="text-xs text-white/40">—</div>
               )}
             </div>
           </div>
 
           {/* crafting */}
           <div>
-            <div className="mb-2 text-xs uppercase tracking-widest text-white/40">Crafting</div>
+            <div className="mb-2 text-xs uppercase tracking-widest text-white/40">{t("crafting")}</div>
             <div className="space-y-1.5">
               {RECIPES.map((r) => {
                 const can = s.craftable.includes(r.id);
@@ -773,6 +769,7 @@ export default function App() {
   const [pauseOpen, setPauseOpen] = useState(false);
   const [cheatOpen, setCheatOpen] = useState(false);
   const [ended, setEnded] = useState<null | "over" | "win">(null);
+  const [chapter2, setChapter2] = useState<null | "new" | "continue">(null);
   const [bestDay, setBestDay] = useState<number>(() => parseInt(ls.get("terralite_bestday", "0"), 10) || 0);
   const [musicOn, setMusicOn] = useState<boolean>(() => ls.get("terralite_music", "1") !== "0");
   const [sfxOn, setSfxOn] = useState<boolean>(() => ls.get("terralite_sfx", "1") !== "0");
@@ -901,6 +898,17 @@ export default function App() {
     setPauseOpen(false);
     setPlayWorldId(null);
   };
+  /** Leaves Chapter I entirely and boots the Sky Islands. */
+  const openChapter2 = (mode: "new" | "continue") => {
+    click();
+    setEnded(null);
+    setInvOpen(false);
+    setPauseOpen(false);
+    setCheatOpen(false);
+    setState(null);
+    setScreen("landing");
+    setChapter2(mode);
+  };
   const selectSlot = (i: number) => {
     engineRef.current?.selectSlot(i);
   };
@@ -953,6 +961,23 @@ export default function App() {
       window.removeEventListener("keyup", ku);
     };
   }, []);
+
+  // ---- CHAPTER II takes over the whole screen ----
+  if (chapter2) {
+    return (
+      <div className="relative h-screen w-screen overflow-hidden bg-[#050810] text-white">
+        <Chapter2
+          mode={chapter2}
+          onExit={() => {
+            setChapter2(null);
+            setScreen("landing");
+            audio.setTrack("menu");
+            window.scrollTo(0, 0);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#070a12] text-white">
@@ -1058,7 +1083,12 @@ export default function App() {
             </div>
           )}
           {ended === "win" && state && (
-            <EndingSequence onContinueWorld={continueInWorld} onNewWorld={retry} onMenu={toMenu} />
+            <EndingSequence
+              onContinueWorld={continueInWorld}
+              onNewWorld={retry}
+              onMenu={toMenu}
+              onChapter2={() => openChapter2("new")}
+            />
           )}
           {ended === "over" && state && (
             <div className="anim-fade absolute inset-0 z-30 flex items-center justify-center px-6">
@@ -1118,6 +1148,10 @@ export default function App() {
             audio.ensure();
             click();
             selectWorld(id);
+          }}
+          onChapter2={(mode) => {
+            audio.ensure();
+            openChapter2(mode);
           }}
         />
       )}
