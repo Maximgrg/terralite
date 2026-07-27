@@ -15,7 +15,7 @@ import { skyTileTexture, skyWallTexture } from "./skyPixart";
 import {
   SKY_GRASS, SKY_STONE, SKY_WOOD, SKY_LEAVES, CLOUD, AETHERITE, SUNSTONE,
   STORMCORE, VOIDSHARD, VOID_STONE, LUMEN, SKYFORGE, ALTAR, SKY_TILE_IDS,
-  SKY_RECIPES, SKY_QUESTS, ARMOR, SET_BONUS, WEAPON_FX, VOID_Y,
+  SKY_RECIPES, SKY_QUESTS, ARMOR, WEAPON_FX, VOID_Y,
   generateSkyWorld, type SkyRecipe, type SkyStation, type SkyWorld, type ArmorSet,
 } from "./skyWorld";
 
@@ -90,7 +90,7 @@ interface Mob {
   x: number; y: number; vx: number; vy: number;
   w: number; h: number; hp: number; maxHp: number;
   facing: number; onGround: boolean; hitFlash: number; t: number;
-  cd: number; phase: number; burn: number; anchorY: number;
+  cd: number; phase: number; burn: number;
 }
 interface Shot { x: number; y: number; vx: number; vy: number; life: number; dmg: number; kind: "rock" | "bolt" | "feather"; }
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string; grav: number; }
@@ -176,6 +176,7 @@ export class SkyEngine {
   private selected = 0;
   private inv: (SkySlot | null)[] = new Array(INV_SIZE).fill(null);
   private armor: SkyArmor = { head: null, chest: null, legs: null };
+  private sunsteelApplied = false;
   private swingT = 0;
   private attackCd = 0;
   private walkT = 0;
@@ -290,6 +291,7 @@ export class SkyEngine {
     this.selected = 0;
     this.inv = new Array(INV_SIZE).fill(null);
     this.armor = { head: null, chest: null, legs: null };
+    this.sunsteelApplied = false;
     this.dayFrac = 0.2;
     this.dayCount = 1;
     this.workbenchCount = 0;
@@ -342,25 +344,32 @@ export class SkyEngine {
   private saveGame() {
     if (!this.world) return;
     this.saveCounter = (this.saveCounter + 1) % 100000;
+    // Never persist a corpse: dying (especially into the void) would otherwise
+    // reload you at 0 HP somewhere below the world and kill you again forever.
+    const dead = this.gameover || this.hp <= 0 || this.py / TILE > VOID_Y - 2;
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
         v: 1,
         tiles: u8ToB64(this.world.tiles),
         altarX: this.world.altarX,
         altarY: this.world.altarY,
-        px: this.px, py: this.py, pface: this.pface,
-        hp: this.hp, maxHp: this.maxHp,
+        px: dead ? this.world.spawnX * TILE : this.px,
+        py: dead ? this.world.spawnY * TILE : this.py,
+        pface: this.pface,
+        hp: dead ? this.maxHp : this.hp,
+        maxHp: this.maxHp,
         selected: this.selected,
         inv: this.inv.map((s) => (s ? { id: s.id, count: s.count } : null)),
         armor: this.armor,
-        dayFrac: this.dayFrac, dayCount: this.dayCount,
+        sunsteelApplied: this.sunsteelApplied,
+        dayFrac: this.dayFrac,
+        dayCount: this.dayCount,
         workbenchCount: this.workbenchCount,
         furnaceCount: this.furnaceCount,
         skyforgeCount: this.skyforgeCount,
         questIndex: this.questIndex,
         mined: this.mined,
         killed: this.killed,
-        victory: this.victory,
       }));
     } catch { /* storage full — ignore */ }
   }
@@ -380,15 +389,21 @@ export class SkyEngine {
     if (tiles.length === this.world.tiles.length) this.world.tiles = tiles;
     this.world.altarX = d.altarX ?? this.world.altarX;
     this.world.altarY = d.altarY ?? this.world.altarY;
-    this.px = d.px;
-    this.py = d.py;
+    this.maxHp = d.maxHp ?? 140;
+    this.hp = d.hp > 0 ? d.hp : this.maxHp;
+    this.px = typeof d.px === "number" ? d.px : this.world.spawnX * TILE;
+    this.py = typeof d.py === "number" ? d.py : this.world.spawnY * TILE;
+    // defensive: an old/corrupt save must never drop you into the void
+    if (!isFinite(this.px) || !isFinite(this.py) || this.py / TILE > VOID_Y - 2 || this.py < 0) {
+      this.px = this.world.spawnX * TILE;
+      this.py = this.world.spawnY * TILE;
+    }
     this.pface = d.pface ?? 1;
-    this.hp = d.hp;
-    this.maxHp = d.maxHp;
     this.selected = d.selected ?? 0;
     this.inv = (d.inv as (SkySlot | null)[]).map((s) => (s && s.id ? { id: s.id, count: s.count } : null));
     while (this.inv.length < INV_SIZE) this.inv.push(null);
     this.armor = d.armor ?? { head: null, chest: null, legs: null };
+    this.sunsteelApplied = !!d.sunsteelApplied;
     this.dayFrac = d.dayFrac ?? 0.2;
     this.dayCount = d.dayCount ?? 1;
     this.workbenchCount = d.workbenchCount ?? 0;
@@ -402,6 +417,7 @@ export class SkyEngine {
     this.pvx = 0;
     this.pvy = 0;
     this.fallDistance = 0;
+    this.jumpsLeft = this.maxJumps();
   }
 
   saveGameNow() { this.saveGame(); }
@@ -563,7 +579,6 @@ export class SkyEngine {
     const l = this.armor.legs && ARMOR[this.armor.legs]?.set;
     return h && h === c && c === l ? (h as ArmorSet) : null;
   }
-  private sunsteelApplied = false;
   private applySetBonus() {
     const wantSunsteel = this.setBonus() === "sunsteel";
     if (wantSunsteel && !this.sunsteelApplied) {
@@ -648,16 +663,15 @@ export class SkyEngine {
 
   private spawnBoss(id: SkyBossId) {
     const st = MOB_STATS[id];
-    const m: Mob = {
+    this.mobs.push({
       type: id,
       x: this.px + (id === "titan" ? 120 : 0),
       y: this.py - (st.fly ? 150 : 60),
       vx: 0, vy: 0,
       w: st.w, h: st.h, hp: st.hp, maxHp: st.hp,
       facing: -1, onGround: false, hitFlash: 0, t: 0,
-      cd: 2.5, phase: 0, burn: 0, anchorY: this.py - 150,
-    };
-    this.mobs.push(m);
+      cd: 2.5, phase: 0, burn: 0,
+    });
     audio.playSfx("bossSpawn");
     audio.setTrack("boss");
     this.showBanner(
@@ -693,7 +707,7 @@ export class SkyEngine {
     this.kd = (e) => {
       const c = e.code;
       if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(c)) e.preventDefault();
-      if (c === "Space" && !this.keys["Space"] && !this.flying) this.jumpNow();
+      if ((c === "Space" || c === "KeyW" || c === "ArrowUp") && !this.keys[c] && !this.flying) this.jumpNow();
       this.keys[c] = true;
       if (c.startsWith("Digit")) {
         const n = parseInt(c.slice(5), 10);
@@ -846,7 +860,7 @@ export class SkyEngine {
     this.pvy = -JUMP_V;
     this.onGround = false;
     this.jumpBuffer = 0;
-    if (!this.onGround) this.jumpsLeft = Math.max(0, this.jumpsLeft - 1);
+    this.jumpsLeft = Math.max(0, this.jumpsLeft - 1);
     audio.playSfx("jump");
     for (let i = 0; i < 4; i++) this.dust(this.px, this.py + 20, "#e8f2ff");
   }
@@ -1196,6 +1210,7 @@ export class SkyEngine {
     this.gameover = true;
     audio.playSfx("gameOver");
     audio.setTrack("none");
+    this.saveGame();
     this.cb.onGameOver();
   }
 
@@ -1223,12 +1238,12 @@ export class SkyEngine {
     const st = MOB_STATS[type];
     if (!st.fly && groundY < 0) return;
 
-    const y = st.fly ? this.py - 40 - Math.random() * 100 : (groundY - 2) * TILE;
     this.mobs.push({
-      type, x: sx, y,
+      type, x: sx,
+      y: st.fly ? this.py - 40 - Math.random() * 100 : (groundY - 2) * TILE,
       vx: 0, vy: 0, w: st.w, h: st.h, hp: st.hp, maxHp: st.hp,
       facing: -side, onGround: false, hitFlash: 0, t: Math.random() * 3,
-      cd: 1 + Math.random() * 2, phase: 0, burn: 0, anchorY: y,
+      cd: 1 + Math.random() * 2, phase: 0, burn: 0,
     });
   }
 
@@ -1324,9 +1339,7 @@ export class SkyEngine {
             m.vx += Math.sign(dx) * 110 * dt;
             m.vx = Math.max(-210, Math.min(210, m.vx));
             m.vy = Math.max(-300, Math.min(300, m.vy));
-            if (this.frame % 34 === 0) {
-              this.shoot(m.x, m.y + 10, this.px, this.py, 320, 18, "feather");
-            }
+            if (this.frame % 34 === 0) this.shoot(m.x, m.y + 10, this.px, this.py, 320, 18, "feather");
           } else if (m.cd > -0.7) {
             m.vx += Math.sign(dx) * 760 * dt;
             m.vy += Math.sign(dy) * 760 * dt;
@@ -1340,7 +1353,7 @@ export class SkyEngine {
               this.mobs.push({
                 type: "harpy", x: m.x + (k % 2 ? 40 : -40), y: m.y,
                 vx: 0, vy: 0, w: hs.w, h: hs.h, hp: hs.hp, maxHp: hs.hp,
-                facing: 1, onGround: false, hitFlash: 0, t: 0, cd: 1.2, phase: 0, burn: 0, anchorY: m.y,
+                facing: 1, onGround: false, hitFlash: 0, t: 0, cd: 1.2, phase: 0, burn: 0,
               });
             }
           }
@@ -1352,13 +1365,11 @@ export class SkyEngine {
           const rage = m.hp < m.maxHp / 2;
           if (m.onGround && m.cd <= 0) {
             if (Math.abs(dx) < TILE * 7) {
-              // ground slam
               m.vy = -520;
               m.vx = m.facing * (rage ? 230 : 150);
               m.cd = rage ? 1.6 : 2.4;
               m.phase = 1;
             } else {
-              // hurl a boulder
               this.shoot(m.x, m.y - 30, this.px, this.py, 420, 24, "rock");
               m.cd = rage ? 1.2 : 2.0;
             }
@@ -1390,7 +1401,6 @@ export class SkyEngine {
           if (m.cd <= 0) {
             const roll = Math.random();
             if (roll < 0.45) {
-              // fan of bolts
               const n = rage ? 5 : 3;
               for (let k = 0; k < n; k++) {
                 const spread = (k - (n - 1) / 2) * 0.28;
@@ -1399,7 +1409,6 @@ export class SkyEngine {
               }
               m.cd = rage ? 1.1 : 1.8;
             } else if (roll < 0.75) {
-              // lightning pillar on the player's position
               this.lightningStrike(this.px, rage ? 30 : 22);
               m.cd = rage ? 1.4 : 2.2;
             } else {
@@ -1408,7 +1417,7 @@ export class SkyEngine {
                 this.mobs.push({
                   type: "wisp", x: m.x + (k % 2 ? 50 : -50), y: m.y + 20,
                   vx: 0, vy: 0, w: ws.w, h: ws.h, hp: ws.hp, maxHp: ws.hp,
-                  facing: 1, onGround: false, hitFlash: 0, t: 0, cd: 1, phase: 0, burn: 0, anchorY: m.y,
+                  facing: 1, onGround: false, hitFlash: 0, t: 0, cd: 1, phase: 0, burn: 0,
                 });
               }
               m.cd = 3;
@@ -1459,8 +1468,7 @@ export class SkyEngine {
   }
 
   private shoot(x: number, y: number, tx: number, ty: number, speed: number, dmg: number, kind: Shot["kind"]) {
-    const ang = Math.atan2(ty - y, tx - x);
-    this.shotAngle(x, y, ang, speed, dmg, kind);
+    this.shotAngle(x, y, Math.atan2(ty - y, tx - x), speed, dmg, kind);
   }
   private shotAngle(x: number, y: number, ang: number, speed: number, dmg: number, kind: Shot["kind"]) {
     this.shots.push({ x, y, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, life: 4, dmg, kind });
@@ -1473,9 +1481,7 @@ export class SkyEngine {
       if (s.kind === "rock") s.vy += 380 * dt;
       s.x += s.vx * dt;
       s.y += s.vy * dt;
-      const tx = Math.floor(s.x / TILE);
-      const ty = Math.floor(s.y / TILE);
-      const hitWall = isSolid(getTile(this.world, tx, ty));
+      const hitWall = isSolid(getTile(this.world, Math.floor(s.x / TILE), Math.floor(s.y / TILE)));
       const hitPlayer = Math.abs(s.x - this.px) < 14 && Math.abs(s.y - this.py) < 26;
       if (hitPlayer) this.hurt(s.dmg);
       if (s.life <= 0 || hitWall || hitPlayer) {
@@ -1673,11 +1679,11 @@ export class SkyEngine {
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         if (getTile(this.world, tx, ty) !== AIR) continue;
-        let above = 0;
-        for (let k = 1; k <= 8; k++) if (isSolid(getTile(this.world, tx, ty - k))) { above = k; break; }
+        let above = false;
+        for (let k = 1; k <= 8; k++) if (isSolid(getTile(this.world, tx, ty - k))) { above = true; break; }
         if (!above) continue;
-        let below = 0;
-        for (let k = 1; k <= 8; k++) if (isSolid(getTile(this.world, tx, ty + k))) { below = k; break; }
+        let below = false;
+        for (let k = 1; k <= 8; k++) if (isSolid(getTile(this.world, tx, ty + k))) { below = true; break; }
         if (!below) continue;
         const kind = ty > 100 ? "void" : "sky";
         const v = (tx * 7 ^ ty * 13) & 3;
@@ -1731,7 +1737,7 @@ export class SkyEngine {
     this.drawGlow(ctx, tx0, ty0, tx1, ty1, night);
 
     // the void eats the bottom of the screen
-    const voidTop = VOID_Y * TILE - 26 * TILE - this.camY;
+    const voidTop = (VOID_Y - 26) * TILE - this.camY;
     if (voidTop < this.viewH) {
       const g = ctx.createLinearGradient(0, Math.max(0, voidTop), 0, this.viewH);
       g.addColorStop(0, "rgba(10,6,24,0)");
@@ -1769,7 +1775,6 @@ export class SkyEngine {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, this.viewW, this.viewH);
 
-    // sun / moon
     const ang = this.dayFrac * Math.PI * 2 - Math.PI / 2;
     const cx = this.viewW / 2 + Math.cos(ang) * this.viewW * 0.42;
     const cy = this.viewH * 0.38 + Math.sin(ang) * this.viewH * 0.36;
@@ -1820,7 +1825,6 @@ export class SkyEngine {
         ctx.fillRect(bx + 5 * s, by - 4 * s, 16 * s, 6 * s);
         ctx.fillRect(bx + 11 * s, by - 7 * s, 8 * s, 5 * s);
       }
-      // silhouettes of far-off islands drifting behind everything
       if (layer < 2) {
         ctx.globalAlpha = night ? 0.28 : 0.22;
         ctx.fillStyle = night ? "#191338" : "#7d94c4";
@@ -1861,19 +1865,17 @@ export class SkyEngine {
       ctx.fill();
       return;
     }
+    const v = (tx * 7 ^ ty * 13) & 3;
+    ctx.drawImage(this.texFor(id, v), 0, 0, TEX, TEX, x, y, TILE, TILE);
     if (id === ALTAR) {
-      const v = (tx * 7 ^ ty * 13) & 3;
-      ctx.drawImage(this.texFor(id, v), 0, 0, TEX, TEX, x, y, TILE, TILE);
       const fl = 0.6 + 0.4 * Math.sin(this.frame * 0.08 + tx);
       ctx.save();
-      ctx.globalAlpha = 0.55 * fl;
+      ctx.globalAlpha = 0.5 * fl;
       ctx.fillStyle = "#c9a8ff";
       ctx.fillRect(x + 10, y - 40, 12, 44);
       ctx.restore();
       return;
     }
-    const v = (tx * 7 ^ ty * 13) & 3;
-    ctx.drawImage(this.texFor(id, v), 0, 0, TEX, TEX, x, y, TILE, TILE);
     if (!isSolid(getTile(this.world, tx, ty - 1))) {
       ctx.fillStyle = "rgba(255,255,255,0.13)";
       ctx.fillRect(x, y, TILE, 2);
@@ -1954,7 +1956,6 @@ export class SkyEngine {
     const bob = moving ? Math.abs(Math.sin(this.walkT)) * -2 : this.onGround ? Math.sin(this.frame * 0.06) * 0.6 : 0;
     const footY = y + 22 + bob;
 
-    // feather cloak wing flare while gliding
     if (this.gliding) {
       ctx.save();
       ctx.globalAlpha = 0.75;
@@ -1977,16 +1978,12 @@ export class SkyEngine {
     ctx.save();
     ctx.globalAlpha = blink ? 0.4 : 1;
     if (spr) {
-      const sw = spr.width;
-      const sh = spr.height;
-      const scale = 56 / sh;
-      const dw = sw * scale;
-      ctx.save();
+      const scale = 56 / spr.height;
+      const dw = spr.width * scale;
       ctx.imageSmoothingEnabled = false;
       ctx.translate(x, footY);
       ctx.scale(this.pface, 1);
-      ctx.drawImage(spr, 0, 0, sw, sh, -dw / 2, -56, dw, 56);
-      ctx.restore();
+      ctx.drawImage(spr, 0, 0, spr.width, spr.height, -dw / 2, -56, dw, 56);
     } else {
       this.drawPlayerFallback(ctx, x, y + bob, moving);
     }
@@ -2256,7 +2253,6 @@ export class SkyEngine {
       ctx.beginPath();
       ctx.ellipse(0, 0, 9 * s, 11 * s, 0, 0, Math.PI * 2);
       ctx.fill();
-      // head + beak
       ctx.fillStyle = OL;
       ctx.fillRect(-6 * s, -20 * s, 12 * s, 10 * s);
       ctx.fillStyle = flash ? "#fff" : big ? "#e0d0ff" : "#c8d6f4";
@@ -2281,7 +2277,6 @@ export class SkyEngine {
         ctx.closePath();
         ctx.fill();
       }
-      // talons
       ctx.fillStyle = "#e8c86a";
       ctx.fillRect(-7 * s, 10 * s, 4 * s, 6 * s);
       ctx.fillRect(3 * s, 10 * s, 4 * s, 6 * s);
@@ -2356,14 +2351,12 @@ export class SkyEngine {
       ctx.fillRect(7, 20, 19, 21);
       ctx.fillStyle = rage ? "#8f5f78" : "#8896b2";
       ctx.fillRect(-35, -6 + sway, 70, 6);
-      // core
       const cg = ctx.createRadialGradient(0, -8 + sway, 2, 0, -8 + sway, 16);
       cg.addColorStop(0, "#ffffff");
       cg.addColorStop(0.4, rage ? "#ff7a4a" : "#ffc44a");
       cg.addColorStop(1, "rgba(255,150,40,0)");
       ctx.fillStyle = cg;
       ctx.fillRect(-18, -26 + sway, 36, 36);
-      // head
       ctx.fillStyle = OL;
       ctx.fillRect(-17, -56 + sway, 34, 24);
       ctx.fillStyle = flash ? "#fff" : "#c3cee4";
@@ -2371,7 +2364,6 @@ export class SkyEngine {
       ctx.fillStyle = rage ? "#ff5a3a" : "#5fd8ff";
       ctx.fillRect(-10, -47 + sway, 7, 7);
       ctx.fillRect(3, -47 + sway, 7, 7);
-      // arms
       ctx.fillStyle = OL;
       ctx.fillRect(32, -26 + sway, 20, 44);
       ctx.fillRect(-52, -26 + sway, 20, 44);
@@ -2382,13 +2374,11 @@ export class SkyEngine {
       const rage = m.phase === 1;
       const halo = 0.7 + 0.3 * Math.sin(m.t * 3);
       ctx.scale(m.facing, 1);
-      // storm halo
       const hg = ctx.createRadialGradient(0, -10, 6, 0, -10, 90 * halo);
       hg.addColorStop(0, rage ? "rgba(255,140,220,0.55)" : "rgba(180,140,255,0.45)");
       hg.addColorStop(1, "rgba(120,80,220,0)");
       ctx.fillStyle = hg;
       ctx.fillRect(-100, -110, 200, 200);
-      // wings of light
       const flap = Math.sin(m.t * 4) * 12;
       ctx.fillStyle = rage ? "rgba(255,150,230,0.75)" : "rgba(200,170,255,0.7)";
       for (let k = 0; k < 3; k++) {
@@ -2406,7 +2396,6 @@ export class SkyEngine {
         ctx.closePath();
         ctx.fill();
       }
-      // body
       ctx.fillStyle = OL;
       ctx.fillRect(-17, -34, 34, 58);
       ctx.fillStyle = flash ? "#fff" : rage ? "#4a1f52" : "#2e2352";
@@ -2414,7 +2403,6 @@ export class SkyEngine {
       ctx.fillStyle = rage ? "#ff8ae0" : "#b48aff";
       ctx.fillRect(-15, -14, 30, 4);
       ctx.fillRect(-6, -32, 12, 54);
-      // head / crown
       ctx.fillStyle = OL;
       ctx.fillRect(-13, -58, 26, 26);
       ctx.fillStyle = flash ? "#fff" : "#170f2e";
@@ -2436,13 +2424,11 @@ export class SkyEngine {
     }
     ctx.restore();
 
-    // health pip for regular mobs
     if (m.hp < m.maxHp && m.type !== "matriarch" && m.type !== "titan" && m.type !== "aetherarch") {
-      const w = m.w;
       ctx.fillStyle = "rgba(0,0,0,0.6)";
-      ctx.fillRect(m.x - w / 2, m.y - m.h / 2 - 10, w, 4);
+      ctx.fillRect(m.x - m.w / 2, m.y - m.h / 2 - 10, m.w, 4);
       ctx.fillStyle = "#ff5a6a";
-      ctx.fillRect(m.x - w / 2, m.y - m.h / 2 - 10, w * (m.hp / m.maxHp), 4);
+      ctx.fillRect(m.x - m.w / 2, m.y - m.h / 2 - 10, m.w * (m.hp / m.maxHp), 4);
     }
   }
 
@@ -2473,8 +2459,7 @@ export class SkyEngine {
     ctx.drawImage(spr, 0, 0, spr.width, spr.height, this.px - pr, this.py - 4 - pr, pr * 2, pr * 2);
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
-        const id = getTile(this.world, tx, ty);
-        const L = TILES[id]?.light ?? 0;
+        const L = TILES[getTile(this.world, tx, ty)]?.light ?? 0;
         if (L < 3) continue;
         const fl = 0.75 + 0.25 * Math.sin(this.frame * 0.14 + tx * 1.7);
         const r = TILE * (0.5 + L * 0.13) * fl;
@@ -2591,7 +2576,7 @@ export class SkyEngine {
   }
 }
 
-/** Tiles the Chapter II minimap needs to colour. */
+/** Tile colours for the Chapter II minimap. */
 export const SKY_MINIMAP_COLORS: Record<number, string> = {
   [SKY_GRASS]: "#7fe3c0",
   [SKY_STONE]: "#b9c6de",
